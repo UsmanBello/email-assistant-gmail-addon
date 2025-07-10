@@ -1,0 +1,33 @@
+{
+    "timeZone": "Etc/UTC",
+    "oauthScopes": [
+        "https://www.googleapis.com/auth/gmail.addons.execute",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/script.external_request"
+    ],
+    "addOns": {
+        "common": {
+            "name": "Email Assistant",
+            "logoUrl": "https://res.cloudinary.com/omoalhaji/image/upload/v1752065327/splash.19ed99618a21c105a562d69e48b7e6b1_jbukyp.png"
+        },
+        "gmail": {
+            "homepageTrigger": {
+                "runFunction": "buildAddOn",
+                "enabled": true
+            },
+            "contextualTriggers": [
+                {
+                    "unconditional": {},
+                    "onTriggerFunction": "buildAddOn"
+                }
+            ],
+            "primaryColor": "#0a7ea4",
+            "secondaryColor": "#3999bc",
+            "openLinkUrlPrefixes": [
+                "https://",
+                "https://fabulous-sundae-79255b.netlify.app/"
+            ]
+        }
+    }
+}
