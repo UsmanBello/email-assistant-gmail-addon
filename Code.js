@@ -193,7 +193,7 @@ function authenticateAddonUser(email, name) {
     var ADDON_SECRET = process.env.ADDON_SECRET;
     try {
         var response = UrlFetchApp.fetch(
-            "https://email-assistant-server-v1-67dc1e1edcdd.herokuapp.com/api/users/auth/addon",
+            "/api/users/auth/addon",
             {
                 method: "post",
                 contentType: "application/json",
@@ -222,7 +222,7 @@ function authenticateAddonUser(email, name) {
 function getOrganizationInfo(email, token) {
     try {
         var response = UrlFetchApp.fetch(
-            "https://email-assistant-server-v1-67dc1e1edcdd.herokuapp.com/api/organizations/by-user-email?email=" + encodeURIComponent(email),
+            `${process.env.SERVER_DOMAIN}/api/organizations/by-user-email?email=${encodeURIComponent(email)}`,
             {
                 muteHttpExceptions: true,
                 headers: { Authorization: "Bearer " + token },
@@ -293,7 +293,7 @@ function onGenerateAIReply(e) {
             .build();
 
         var response = UrlFetchApp.fetch(
-            "https://email-assistant-server-v1-67dc1e1edcdd.herokuapp.com/api/responses/generate-addon?organizationId=" + orgInfo.organizationId,
+            `${process.env.SERVER_DOMAIN}/api/responses/generate-addon?organizationId=${orgInfo.organizationId}`,
             {
                 method: "post",
                 contentType: "application/json",
