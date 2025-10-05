@@ -1,91 +1,65 @@
+var SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
+var SERVER_DOMAIN = SCRIPT_PROPERTIES.getProperty('SERVER_DOMAIN');
+var ADDON_SECRET = SCRIPT_PROPERTIES.getProperty('ADDON_SECRET');
+
 function buildAddOn(e) {
     var cardBuilder = CardService.newCardBuilder()
         .setHeader(CardService.newCardHeader().setTitle("Email Assistant"));
 
-    var userProps = PropertiesService.getUserProperties();
-    var jwtToken = userProps.getProperty('jwtToken');
     var email = Session.getActiveUser().getEmail();
-    var name = '';
-    try {
-        // Try to get user's name from the Gmail message if available
-        if (e && e.gmail && e.gmail.messageId) {
-            var message = GmailApp.getMessageById(e.gmail.messageId);
-            var from = message.getFrom();
-            // Extract name from "Name <email>" format
-            var match = from.match(/^(.*?)\s*<.*?>$/);
-            if (match && match[1]) {
-                name = match[1];
-            }
-        }
-    } catch (err) {
-        // Ignore errors, fallback to empty name
-    }
-
-    // Check if JWT exists and is valid (not expired)
-    var isTokenValid = false;
-    if (jwtToken) {
-        try {
-            var payload = JSON.parse(Utilities.newBlob(Utilities.base64Decode(jwtToken.split('.')[1])).getDataAsString());
-            var now = Math.floor(Date.now() / 1000);
-            if (payload.exp && payload.exp > now) {
-                isTokenValid = true;
-            } else {
-                // Token expired, remove it
-                userProps.deleteProperty('jwtToken');
-                jwtToken = null;
-            }
-        } catch (err) {
-            // Invalid token, remove it
-            userProps.deleteProperty('jwtToken');
-            jwtToken = null;
-        }
-    }
-
-    if (!jwtToken || !isTokenValid) {
-        // Not authenticated: show Login and Register buttons
+    var idToken = ScriptApp.getIdentityToken();
+    var userInfo = getUserInfo(email, idToken);
+    Logger.log('buildAddOn: User info received: ' + JSON.stringify(userInfo));
+    
+    // Check if user is not registered in our system
+    if (userInfo && userInfo.error === "User not registered") {
+        Logger.log('buildAddOn: User not registered in Email Assistant system');
         cardBuilder.addSection(
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(
-                    "To use Email Assistant, please log in or register."
-                ))
-                .addWidget(
-                    CardService.newTextButton()
-                        .setText("Login")
-                        .setOnClickAction(CardService.newAction().setFunctionName("onAddonLogin"))
-                )
-                .addWidget(
-                    CardService.newTextButton()
-                        .setText("Register")
-                        .setOpenLink(CardService.newOpenLink().setUrl("https://fabulous-sundae-79255b.netlify.app/auth?source=addon"))
-                )
-        );
-        return cardBuilder.build();
-    }
-
-    // Authenticated: proceed to org lookup and main features
-    var orgInfo = getOrganizationInfo(email, jwtToken);
-    if (!orgInfo || orgInfo.error) {
-        cardBuilder.addSection(
-            CardService.newCardSection()
-                .addWidget(CardService.newTextParagraph().setText(
-                    "You need to register with Email Assistant before using this add-on."
+                    "Welcome! You need to register with Email Assistant before using this add-on."
                 ))
                 .addWidget(
                     CardService.newTextButton()
                         .setText("Register Now")
-                        .setOpenLink(CardService.newOpenLink().setUrl("https://fabulous-sundae-79255b.netlify.app/auth?source=addon"))
+                        .setOpenLink(CardService.newOpenLink().setUrl("https://email-ai-assistant.netlify.app/register"))
+                )
+        );
+        return cardBuilder.build();
+    }
+    
+    // Check for other errors (authentication failures, etc.)
+    if (!userInfo || userInfo.error || (!userInfo.organizationId && !userInfo.userId)) {
+        Logger.log('buildAddOn: User authentication failed - userInfo: ' + JSON.stringify(userInfo));
+        cardBuilder.addSection(
+            CardService.newCardSection()
+                .addWidget(CardService.newTextParagraph().setText(
+                    "Authentication error. Please try refreshing the addon."
+                ))
+                .addWidget(
+                    CardService.newTextButton()
+                        .setText("Try Again")
+                        .setOnClickAction(CardService.newAction().setFunctionName("buildAddOn"))
                 )
         );
         return cardBuilder.build();
     }
 
-    // Show organization name (and logo if available)
-    var orgSection = CardService.newCardSection()
-        .addWidget(CardService.newTextParagraph().setText(
-            '<b>Company:</b> ' + orgInfo.organizationName
+    Logger.log('buildAddOn: User authentication successful - userType: ' + userInfo.userType);
+
+    // Show user/organization info based on user type
+    var infoSection = CardService.newCardSection();
+    if (userInfo.userType === 'organization') {
+        infoSection.addWidget(CardService.newTextParagraph().setText(
+            '<b>Company:</b> ' + userInfo.organizationName
         ));
+    } else {
+        infoSection.addWidget(CardService.newTextParagraph().setText(
+            '<b>User:</b> ' + userInfo.userName
+        ));
+    }
     // TODO: Add logo when available
-    cardBuilder.addSection(orgSection);
+    cardBuilder.addSection(infoSection);
 
     // Add settings section
     var settingsSection = CardService.newCardSection()
@@ -133,106 +107,28 @@ function buildAddOn(e) {
     return cardBuilder.build();
 }
 
-function onAddonLogin(e) {
-    var userProps = PropertiesService.getUserProperties();
-    var email = Session.getActiveUser().getEmail();
-    Logger.log('Active user email: ' + email);
-    if (!email) {
-        Logger.log('No email found for active user.');
-        return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
-            .addSection(
-                CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText("Login failed: No Gmail user email found. Please ensure you are logged into Gmail."))
-            )
-            .build();
-    }
-    var name = '';
-    try {
-        if (e && e.gmail && e.gmail.messageId) {
-            var message = GmailApp.getMessageById(e.gmail.messageId);
-            var from = message.getFrom();
-            var match = from.match(/^(.*?)\s*<.*?>$/);
-            if (match && match[1]) {
-                name = match[1];
-            }
-        }
-    } catch (err) { }
-    if (!name) {
-        name = email; // fallback to email as name
-    }
-    Logger.log('Extracted name: ' + name);
-    var authResult = authenticateAddonUser(email, name);
-    if (authResult && authResult.token) {
-        userProps.setProperty('jwtToken', authResult.token);
-        Logger.log('Add-on login successful. JWT: ' + authResult.token);
-        // Show a success message
-        return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
-            .addSection(
-                CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText("Login successful!"))
-            )
-            .build();
-    } else {
-        userProps.deleteProperty('jwtToken');
-        var errorMsg = (authResult && authResult.error) ? authResult.error : "Login failed.";
-        Logger.log('Add-on login failed: ' + errorMsg);
-        // Show an error message
-        return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
-            .addSection(
-                CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText("Login failed: " + errorMsg))
-            )
-            .build();
-    }
-}
-
-function authenticateAddonUser(email, name) {
-    var ADDON_SECRET = process.env.ADDON_SECRET;
+function getUserInfo(email, idToken) {
     try {
         var response = UrlFetchApp.fetch(
-            "/api/users/auth/addon",
+            SERVER_DOMAIN + "/api/organizations/by-user-email?email=" + encodeURIComponent(email),
             {
-                method: "post",
-                contentType: "application/json",
-                payload: JSON.stringify({ email: email, name: name }),
                 muteHttpExceptions: true,
-                headers: { 'X-Addon-Secret': ADDON_SECRET },
+                headers: { Authorization: "Bearer " + idToken },
             }
         );
         var code = response.getResponseCode();
+        Logger.log("User lookup response code: " + code + " for email: " + email);
         if (code === 200) {
-            return JSON.parse(response.getContentText());
+            var responseData = JSON.parse(response.getContentText());
+            Logger.log("User lookup successful response: " + JSON.stringify(responseData));
+            return responseData;
+        } else if (code === 404) {
+            // User is authenticated but not registered in our system
+            var errorData = JSON.parse(response.getContentText());
+            Logger.log("User not registered in system: " + JSON.stringify(errorData));
+            return { error: "User not registered", message: errorData.message || "User not found in Email Assistant database" };
         } else {
-            Logger.log("Add-on auth failed for " + email + " - HTTP " + code + ": " + response.getContentText());
-            try {
-                return { error: JSON.parse(response.getContentText()).message };
-            } catch (err) {
-                return { error: "Unknown error" };
-            }
-        }
-    } catch (err) {
-        Logger.log("Exception in add-on auth for " + email + ": " + err);
-        return { error: "Exception" };
-    }
-}
-
-function getOrganizationInfo(email, token) {
-    try {
-        var response = UrlFetchApp.fetch(
-            `${process.env.SERVER_DOMAIN}/api/organizations/by-user-email?email=${encodeURIComponent(email)}`,
-            {
-                muteHttpExceptions: true,
-                headers: { Authorization: "Bearer " + token },
-            }
-        );
-        var code = response.getResponseCode();
-        if (code === 200) {
-            return JSON.parse(response.getContentText());
-        } else {
-            Logger.log("Org lookup failed for " + email + " - HTTP " + code + ": " + response.getContentText());
+            Logger.log("User lookup failed for " + email + " - HTTP " + code + ": " + response.getContentText());
             try {
                 return JSON.parse(response.getContentText());
             } catch (err) {
@@ -240,26 +136,50 @@ function getOrganizationInfo(email, token) {
             }
         }
     } catch (err) {
-        Logger.log("Exception in org lookup for " + email + ": " + err);
+        Logger.log("Exception in user lookup for " + email + ": " + err);
         return { error: "Exception" };
     }
 }
 
 function onGenerateAIReply(e) {
-    var userProps = PropertiesService.getUserProperties();
-    var jwtToken = userProps.getProperty('jwtToken');
     var email = Session.getActiveUser().getEmail();
-    var orgInfo = null;
-    if (jwtToken) {
-        orgInfo = getOrganizationInfo(email, jwtToken);
-    }
-    if (!orgInfo || !orgInfo.organizationId) {
-        Logger.log('AI Reply: Organization not found for user ' + email);
+    var idToken = ScriptApp.getIdentityToken();
+    Logger.log('Google ID Token (for backend verification): ' + idToken);
+    var userInfo = null;
+    // Use the existing getUserInfo, but pass idToken instead of jwtToken
+    userInfo = getUserInfo(email, idToken);
+    Logger.log('AI Reply: User info received: ' + JSON.stringify(userInfo));
+    
+    // Check if user is not registered in our system
+    if (userInfo && userInfo.error === "User not registered") {
+        Logger.log('AI Reply: User not registered in Email Assistant system');
         return CardService.newCardBuilder()
             .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
             .addSection(
                 CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText("Organization not found. Please register or contact your admin."))
+                    .addWidget(CardService.newTextParagraph().setText("Please register with Email Assistant first to use AI reply generation."))
+                    .addWidget(
+                        CardService.newTextButton()
+                            .setText("Register Now")
+                            .setOpenLink(CardService.newOpenLink().setUrl("https://email-ai-assistant.netlify.app/register"))
+                    )
+            )
+            .build();
+    }
+    
+    // Check for other errors (authentication failures, etc.)
+    if (!userInfo || userInfo.error || (!userInfo.organizationId && !userInfo.userId)) {
+        Logger.log('AI Reply: User authentication failed - userInfo: ' + JSON.stringify(userInfo));
+        return CardService.newCardBuilder()
+            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
+            .addSection(
+                CardService.newCardSection()
+                    .addWidget(CardService.newTextParagraph().setText("Authentication error. Please try again."))
+                    .addWidget(
+                        CardService.newTextButton()
+                            .setText("Try Again")
+                            .setOnClickAction(CardService.newAction().setFunctionName("onGenerateAIReply"))
+                    )
             )
             .build();
     }
@@ -280,20 +200,11 @@ function onGenerateAIReply(e) {
     }
 
     // Call backend to generate AI reply using the add-on specific endpoint
-    var aiReply = '';
+    var aiReplies = [];
     var errorMsg = '';
     try {
-        // Show loading state
-        var loadingCard = CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
-            .addSection(
-                CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText("🤖 Generating AI reply... Please wait."))
-            )
-            .build();
-
         var response = UrlFetchApp.fetch(
-            `${process.env.SERVER_DOMAIN}/api/responses/generate-addon?organizationId=${orgInfo.organizationId}`,
+            SERVER_DOMAIN + "/api/responses/generate-addon",
             {
                 method: "post",
                 contentType: "application/json",
@@ -305,7 +216,7 @@ function onGenerateAIReply(e) {
                     messageId: messageId
                 }),
                 muteHttpExceptions: true,
-                headers: { Authorization: "Bearer " + jwtToken },
+                headers: { Authorization: "Bearer " + idToken },
             }
         );
         var code = response.getResponseCode();
@@ -314,66 +225,53 @@ function onGenerateAIReply(e) {
             var data = JSON.parse(response.getContentText());
             Logger.log('AI Reply: Backend response data: ' + JSON.stringify(data));
             if (data.responses && data.responses.length > 0) {
-                // The backend returns an array of objects with 'content' property
-                var firstResponse = data.responses[0];
-                if (firstResponse && firstResponse.content) {
-                    aiReply = firstResponse.content;
-                } else if (typeof firstResponse === 'string') {
-                    aiReply = firstResponse;
-                } else {
-                    aiReply = JSON.stringify(firstResponse);
-                }
-                Logger.log('AI Reply: Extracted reply: ' + aiReply.substring(0, 100) + '...');
+                aiReplies = data.responses.map(function (r) { return r.content || r; });
             } else {
                 errorMsg = "No AI reply generated.";
                 Logger.log('AI Reply: No AI reply generated in response.');
             }
         } else {
-            errorMsg = "AI reply generation failed: " + response.getContentText();
-            Logger.log('AI Reply: Error response from backend: ' + response.getContentText());
+            var errorResponse = response.getContentText();
+            Logger.log('AI Reply: Error response from backend: ' + errorResponse);
+            
+            // Parse error response to show user-friendly message
+            try {
+                var errorData = JSON.parse(errorResponse);
+                if (errorData.error && errorData.error.includes('429')) {
+                    errorMsg = "OpenAI quota exceeded. Please check your billing or try again later.";
+                } else if (errorData.message) {
+                    errorMsg = "AI reply generation failed: " + errorData.message;
+                } else {
+                    errorMsg = "AI reply generation failed. Please try again.";
+                }
+            } catch (parseError) {
+                errorMsg = "AI reply generation failed. Please try again.";
+            }
         }
     } catch (err) {
         errorMsg = "Error generating AI reply: " + err;
         Logger.log('AI Reply: Exception during backend call: ' + err);
     }
 
-    if (aiReply) {
+    if (aiReplies.length > 0) {
         var cardBuilder = CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"));
+            .setHeader(CardService.newCardHeader().setTitle("AI Suggested Replies"));
 
-        // Show the first response
-        var section = CardService.newCardSection()
-            .addWidget(CardService.newTextParagraph().setText("<b>AI Suggested Reply:</b><br>" + aiReply));
-
-        // Add "Use This Reply" button to populate Gmail's reply field
-        section.addWidget(
-            CardService.newTextButton()
-                .setText("Use This Reply")
-                .setOnClickAction(CardService.newAction().setFunctionName("onUseReply").setParameters({
-                    replyText: aiReply
-                }))
-        );
-
-        // If there are multiple responses, show them as options
-        if (data.responses && data.responses.length > 1) {
-            section.addWidget(CardService.newTextParagraph().setText("<br><b>Alternative Options:</b>"));
-            for (var i = 1; i < Math.min(data.responses.length, 3); i++) {
-                var altResponse = data.responses[i];
-                var altContent = altResponse.content || altResponse;
-                section.addWidget(CardService.newTextParagraph().setText("<br><b>Option " + (i + 1) + ":</b><br>" + altContent));
-
-                // Add "Use This Reply" button for each alternative
-                section.addWidget(
+        // Remove unsupported HTML and use CardSection for each response
+        for (var i = 0; i < aiReplies.length; i++) {
+            var replyText = aiReplies[i];
+            var responseSection = CardService.newCardSection()
+                .addWidget(CardService.newTextParagraph().setText(replyText))
+                .addWidget(
                     CardService.newTextButton()
-                        .setText("Use Option " + (i + 1))
+                        .setText("Use This Reply")
                         .setOnClickAction(CardService.newAction().setFunctionName("onUseReply").setParameters({
-                            replyText: altContent
+                            replyText: replyText
                         }))
                 );
-            }
+            cardBuilder.addSection(responseSection);
         }
 
-        cardBuilder.addSection(section);
         return cardBuilder.build();
     } else {
         return CardService.newCardBuilder()

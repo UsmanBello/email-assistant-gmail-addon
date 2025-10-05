@@ -26,8 +26,15 @@
             "secondaryColor": "#3999bc",
             "openLinkUrlPrefixes": [
                 "https://",
-                "https://fabulous-sundae-79255b.netlify.app/"
+                "https://email-ai-assistant.netlify.app/"
             ]
         }
-    }
+    },
+    "executionApi": {
+        "access": "ANYONE"
+    },
+    "urlFetchWhitelist": [
+        "https://email-ai-assistant.netlify.app/",
+        "https://email-assistant-server-v1-67dc1e1edcdd.herokuapp.com/"
+    ]
 }
