@@ -3,14 +3,13 @@ var SERVER_DOMAIN = SCRIPT_PROPERTIES.getProperty('SERVER_DOMAIN');
 var ADDON_SECRET = SCRIPT_PROPERTIES.getProperty('ADDON_SECRET');
 
 function buildAddOn(e) {
-    var cardBuilder = CardService.newCardBuilder()
-        .setHeader(CardService.newCardHeader().setTitle("Email Assistant"));
+    var cardBuilder = CardService.newCardBuilder();
 
     var email = Session.getActiveUser().getEmail();
     var idToken = ScriptApp.getIdentityToken();
     var userInfo = getUserInfo(email, idToken);
     Logger.log('buildAddOn: User info received: ' + JSON.stringify(userInfo));
-    
+
     // Check if user is not registered in our system
     if (userInfo && userInfo.error === "User not registered") {
         Logger.log('buildAddOn: User not registered in Email Assistant system');
@@ -27,7 +26,7 @@ function buildAddOn(e) {
         );
         return cardBuilder.build();
     }
-    
+
     // Check for other errors (authentication failures, etc.)
     if (!userInfo || userInfo.error || (!userInfo.organizationId && !userInfo.userId)) {
         Logger.log('buildAddOn: User authentication failed - userInfo: ' + JSON.stringify(userInfo));
@@ -47,28 +46,31 @@ function buildAddOn(e) {
 
     Logger.log('buildAddOn: User authentication successful - userType: ' + userInfo.userType);
 
-    // Show user/organization info based on user type
+    // Show user/organization info with settings button using DecoratedText for proper alignment
     var infoSection = CardService.newCardSection();
-    if (userInfo.userType === 'organization') {
-        infoSection.addWidget(CardService.newTextParagraph().setText(
-            '<b>Company:</b> ' + userInfo.organizationName
-        ));
-    } else {
-        infoSection.addWidget(CardService.newTextParagraph().setText(
-            '<b>User:</b> ' + userInfo.userName
-        ));
-    }
-    // TODO: Add logo when available
-    cardBuilder.addSection(infoSection);
 
-    // Add settings section
-    var settingsSection = CardService.newCardSection()
-        .addWidget(
-            CardService.newTextButton()
-                .setText("⚙️ Settings")
-                .setOnClickAction(CardService.newAction().setFunctionName("onShowSettings"))
-        );
-    cardBuilder.addSection(settingsSection);
+    var settingsButton = CardService.newTextButton()
+        .setText("⚙️ Settings")
+        .setOnClickAction(CardService.newAction()
+            .setFunctionName('onShowSettings'));
+
+    if (userInfo.userType === 'organization') {
+        var decoratedText = CardService.newDecoratedText()
+            .setText('<font color="#0a7ea4"><b>🏢 ' + userInfo.organizationName + '</b></font>')
+            .setButton(settingsButton)
+            .setWrapText(false);
+
+        infoSection.addWidget(decoratedText);
+    } else {
+        var decoratedText = CardService.newDecoratedText()
+            .setText('<font color="#0a7ea4"><b>👤 ' + userInfo.userName + '</b></font>')
+            .setButton(settingsButton)
+            .setWrapText(false);
+
+        infoSection.addWidget(decoratedText);
+    }
+
+    cardBuilder.addSection(infoSection);
 
     // If in email context, show email info and Generate button
     if (e && e.gmail && e.gmail.messageId) {
@@ -81,26 +83,39 @@ function buildAddOn(e) {
         cardBuilder.addSection(
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(
-                    '<b>Subject:</b> ' + subject + '<br>' +
-                    '<b>From:</b> ' + from + '<br><br>' +
-                    '<b>Body Preview:</b><br>' + snippet
+                    '<div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px;">' +
+                    '<font color="#0a7ea4" size="4"><b>📧 Selected Email</b></font>' +
+                    '<br><br>' +
+                    '<b>Subject:</b> ' + subject +
+                    '<br><br>' +
+                    '<b>From:</b> ' + from +
+                    '<br><br>' +
+                    '<b>Preview:</b><br>' +
+                    '<font color="#555" size="2">' + snippet + '</font>' +
+                    '</div>'
                 ))
                 .addWidget(
                     CardService.newTextButton()
-                        .setText("Generate AI Reply")
+                        .setText("🤖 Generate AI Reply")
                         .setOnClickAction(CardService.newAction().setFunctionName("onGenerateAIReply"))
                 )
         );
     } else {
-        // Not in email context
+        // Not in email context - show instruction message
         cardBuilder.addSection(
             CardService.newCardSection()
-                .addWidget(CardService.newTextParagraph().setText("Welcome to the Email Assistant Gmail Add-on!"))
-                .addWidget(
-                    CardService.newTextButton()
-                        .setText("Generate AI Reply")
-                        .setOnClickAction(CardService.newAction().setFunctionName("onGenerateAIReply"))
-                )
+                .addWidget(CardService.newTextParagraph().setText(
+                    '<div style="text-align: center; margin-bottom: 50px;">' +
+                    '<font color="#333">To get started, please <b>select an email message</b> from your inbox that you\'d like to generate an AI reply for.</font>' +
+                    '</div>'
+                ))
+                .addWidget(CardService.newTextParagraph().setText(
+                    '<table width="100%" cellpadding="12" cellspacing="0" style="background-color: #e8f4fd; border-radius: 6px; border: 1px solid #b3ddf2;">' +
+                    '<tr><td>' +
+                    '<font color="#0a7ea4"><b>💡 Tip:</b> <i>Click on any email in your inbox, then open this add-on to see the AI reply options.</i></font>' +
+                    '</td></tr>' +
+                    '</table>'
+                ))
         );
     }
 
@@ -109,6 +124,19 @@ function buildAddOn(e) {
 
 function getUserInfo(email, idToken) {
     try {
+        if (!SERVER_DOMAIN) {
+            Logger.log("ERROR: SERVER_DOMAIN is not configured in script properties");
+            return { error: "Configuration error", message: "Server domain is not configured. Please check script properties." };
+        }
+
+        if (!idToken) {
+            Logger.log("ERROR: Google ID token is missing");
+            return { error: "Authentication error", message: "Failed to get Google ID token. Please try refreshing the add-on." };
+        }
+
+        Logger.log("User lookup request - Email: " + email + ", Server: " + SERVER_DOMAIN);
+        Logger.log("ID Token preview: " + (idToken ? idToken.substring(0, 20) + "..." : "null"));
+
         var response = UrlFetchApp.fetch(
             SERVER_DOMAIN + "/api/organizations/by-user-email?email=" + encodeURIComponent(email),
             {
@@ -117,27 +145,67 @@ function getUserInfo(email, idToken) {
             }
         );
         var code = response.getResponseCode();
+        var responseText = response.getContentText();
+
         Logger.log("User lookup response code: " + code + " for email: " + email);
+        Logger.log("Response text: " + responseText.substring(0, 200));
+
         if (code === 200) {
-            var responseData = JSON.parse(response.getContentText());
+            var responseData = JSON.parse(responseText);
             Logger.log("User lookup successful response: " + JSON.stringify(responseData));
             return responseData;
         } else if (code === 404) {
             // User is authenticated but not registered in our system
-            var errorData = JSON.parse(response.getContentText());
-            Logger.log("User not registered in system: " + JSON.stringify(errorData));
-            return { error: "User not registered", message: errorData.message || "User not found in Email Assistant database" };
-        } else {
-            Logger.log("User lookup failed for " + email + " - HTTP " + code + ": " + response.getContentText());
             try {
-                return JSON.parse(response.getContentText());
+                var errorData = JSON.parse(responseText);
+                Logger.log("User not registered in system: " + JSON.stringify(errorData));
+                return { error: "User not registered", message: errorData.message || "User not found in Email Assistant database" };
+            } catch (parseErr) {
+                Logger.log("Error parsing 404 response: " + parseErr);
+                return { error: "User not registered", message: "User not found in Email Assistant database" };
+            }
+        } else if (code === 401) {
+            // Authentication failed
+            try {
+                var errorData = JSON.parse(responseText);
+                Logger.log("Authentication failed: " + JSON.stringify(errorData));
+                return {
+                    error: "Authentication failed",
+                    message: errorData.message || errorData.error || "Invalid Google ID token. Please check server configuration."
+                };
+            } catch (parseErr) {
+                Logger.log("Error parsing 401 response: " + parseErr);
+                return { error: "Authentication failed", message: "Invalid Google ID token" };
+            }
+        } else if (code === 500) {
+            // Server error
+            try {
+                var errorData = JSON.parse(responseText);
+                Logger.log("Server error: " + JSON.stringify(errorData));
+                return {
+                    error: "Server error",
+                    message: errorData.message || errorData.error || "Server configuration error. Please contact support."
+                };
+            } catch (parseErr) {
+                Logger.log("Error parsing 500 response: " + parseErr);
+                return { error: "Server error", message: "Internal server error" };
+            }
+        } else {
+            Logger.log("User lookup failed for " + email + " - HTTP " + code + ": " + responseText);
+            try {
+                var errorData = JSON.parse(responseText);
+                return {
+                    error: "Request failed",
+                    message: errorData.message || errorData.error || "Unexpected error (HTTP " + code + ")"
+                };
             } catch (err) {
-                return { error: "Unknown error" };
+                return { error: "Request failed", message: "Unexpected error (HTTP " + code + ")" };
             }
         }
     } catch (err) {
-        Logger.log("Exception in user lookup for " + email + ": " + err);
-        return { error: "Exception" };
+        Logger.log("Exception in user lookup for " + email + ": " + err.toString());
+        Logger.log("Exception stack: " + (err.stack || "No stack trace"));
+        return { error: "Exception", message: "Error connecting to server: " + err.toString() };
     }
 }
 
@@ -149,7 +217,7 @@ function onGenerateAIReply(e) {
     // Use the existing getUserInfo, but pass idToken instead of jwtToken
     userInfo = getUserInfo(email, idToken);
     Logger.log('AI Reply: User info received: ' + JSON.stringify(userInfo));
-    
+
     // Check if user is not registered in our system
     if (userInfo && userInfo.error === "User not registered") {
         Logger.log('AI Reply: User not registered in Email Assistant system');
@@ -166,7 +234,7 @@ function onGenerateAIReply(e) {
             )
             .build();
     }
-    
+
     // Check for other errors (authentication failures, etc.)
     if (!userInfo || userInfo.error || (!userInfo.organizationId && !userInfo.userId)) {
         Logger.log('AI Reply: User authentication failed - userInfo: ' + JSON.stringify(userInfo));
@@ -233,7 +301,7 @@ function onGenerateAIReply(e) {
         } else {
             var errorResponse = response.getContentText();
             Logger.log('AI Reply: Error response from backend: ' + errorResponse);
-            
+
             // Parse error response to show user-friendly message
             try {
                 var errorData = JSON.parse(errorResponse);
