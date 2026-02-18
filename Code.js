@@ -328,14 +328,18 @@ function onGenerateAIReply(e) {
         // Remove unsupported HTML and use CardSection for each response
         for (var i = 0; i < aiReplies.length; i++) {
             var replyText = aiReplies[i];
+            var composeAction = CardService.newAction()
+                .setFunctionName("onUseReply")
+                .setParameters({
+                    replyText: replyText
+                });
+            
             var responseSection = CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(replyText))
                 .addWidget(
                     CardService.newTextButton()
                         .setText("Use This Reply")
-                        .setOnClickAction(CardService.newAction().setFunctionName("onUseReply").setParameters({
-                            replyText: replyText
-                        }))
+                        .setComposeAction(composeAction, CardService.ComposedEmailType.REPLY_AS_DRAFT)
                 );
             cardBuilder.addSection(responseSection);
         }
@@ -359,6 +363,7 @@ function onGenerateAIReply(e) {
 
 function onUseReply(e) {
     var replyText = e.parameters.replyText;
+    
     if (!replyText) {
         return CardService.newCardBuilder()
             .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
@@ -369,25 +374,43 @@ function onUseReply(e) {
             .build();
     }
 
-    // Show the reply in a multi-line text input for easy copy-paste
-    var inputField = CardService.newTextInput()
-        .setFieldName("aiReplyText")
-        .setTitle("AI Suggested Reply:")
-        .setValue(replyText)
-        .setMultiline(true);
-
-    // Add a Copy to Clipboard button (note: Apps Script can't copy to clipboard directly, but user can select/copy easily)
-    var instructions = CardService.newTextParagraph().setText(
-        "<b>Instructions:</b> Select the text above, copy it (Ctrl+C or Cmd+C), and paste it into your Gmail reply field.");
-
-    return CardService.newCardBuilder()
-        .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
-        .addSection(
-            CardService.newCardSection()
-                .addWidget(inputField)
-                .addWidget(instructions)
-        )
-        .build();
+    try {
+        // REQUIRED: Set the access token to access the message
+        var accessToken = e.gmail.accessToken;
+        GmailApp.setCurrentMessageAccessToken(accessToken);
+        
+        // Get the current message to reply to
+        var messageId = e.gmail.messageId;
+        if (!messageId) {
+            // Fallback: create a new draft if no message context
+            var draft = GmailApp.createDraft('', '', replyText);
+            return CardService.newComposeActionResponseBuilder()
+                .setGmailDraft(draft)
+                .build();
+        }
+        
+        var message = GmailApp.getMessageById(messageId);
+        
+        // Create a draft reply with the AI-generated text
+        var draft = message.createDraftReply(replyText);
+        
+        // Return a ComposeActionResponse that opens this draft
+        return CardService.newComposeActionResponseBuilder()
+            .setGmailDraft(draft)
+            .build();
+            
+    } catch (err) {
+        Logger.log('Error in onUseReply: ' + err.toString());
+        return CardService.newCardBuilder()
+            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
+            .addSection(
+                CardService.newCardSection()
+                    .addWidget(CardService.newTextParagraph().setText(
+                        "Error creating reply draft: " + err.toString()
+                    ))
+            )
+            .build();
+    }
 }
 
 function onShowSettings(e) {
