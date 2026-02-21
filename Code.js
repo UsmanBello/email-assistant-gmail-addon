@@ -4,7 +4,8 @@ var ADDON_SECRET = SCRIPT_PROPERTIES.getProperty('ADDON_SECRET');
 var FRONTEND_URL = SCRIPT_PROPERTIES.getProperty('FRONTEND_URL') || 'https://email-ai-assistant.netlify.app';
 
 function buildAddOn(e) {
-    var cardBuilder = CardService.newCardBuilder();
+    var cardBuilder = CardService.newCardBuilder()
+        .setHeader(CardService.newCardHeader().setTitle("Email Assistant"));
 
     var email = Session.getActiveUser().getEmail();
     var idToken = ScriptApp.getIdentityToken();
@@ -47,31 +48,10 @@ function buildAddOn(e) {
 
     Logger.log('buildAddOn: User authentication successful - userType: ' + userInfo.userType);
 
-    // Show user/organization info with settings button using DecoratedText for proper alignment
-    var infoSection = CardService.newCardSection();
-
-    var settingsButton = CardService.newTextButton()
-        .setText("⚙️ Settings")
-        .setOnClickAction(CardService.newAction()
-            .setFunctionName('onShowSettings'));
-
-    if (userInfo.userType === 'organization') {
-        var decoratedText = CardService.newDecoratedText()
-            .setText('<font color="#0a7ea4"><b>🏢 ' + userInfo.organizationName + '</b></font>')
-            .setButton(settingsButton)
-            .setWrapText(false);
-
-        infoSection.addWidget(decoratedText);
-    } else {
-        var decoratedText = CardService.newDecoratedText()
-            .setText('<font color="#0a7ea4"><b>👤 ' + userInfo.userName + '</b></font>')
-            .setButton(settingsButton)
-            .setWrapText(false);
-
-        infoSection.addWidget(decoratedText);
-    }
-
-    cardBuilder.addSection(infoSection);
+    // Dynamic header: "Select Email" when no email chosen, "Selected Email" when viewing one
+    var headerTitle = (e && e.gmail && e.gmail.messageId) ? "Selected Email" : "Select Email";
+    cardBuilder = CardService.newCardBuilder()
+        .setHeader(CardService.newCardHeader().setTitle(headerTitle));
 
     // If in email context, show email info and Generate button
     if (e && e.gmail && e.gmail.messageId) {
@@ -85,7 +65,6 @@ function buildAddOn(e) {
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(
                     '<div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px;">' +
-                    '<font color="#0a7ea4" size="4"><b>📧 Selected Email</b></font>' +
                     '<br><br>' +
                     '<b>Subject:</b> ' + subject +
                     '<br><br>' +
@@ -98,7 +77,9 @@ function buildAddOn(e) {
                 .addWidget(
                     CardService.newTextButton()
                         .setText("🤖 Generate AI Reply")
-                        .setOnClickAction(CardService.newAction().setFunctionName("onGenerateAIReply"))
+                        .setOnClickAction(CardService.newAction()
+                            .setFunctionName("onGenerateAIReply")
+                            .setLoadIndicator(CardService.LoadIndicator.SPINNER))
                 )
         );
     } else {
@@ -247,7 +228,9 @@ function onGenerateAIReply(e) {
                     .addWidget(
                         CardService.newTextButton()
                             .setText("Try Again")
-                            .setOnClickAction(CardService.newAction().setFunctionName("onGenerateAIReply"))
+                            .setOnClickAction(CardService.newAction()
+                                .setFunctionName("onGenerateAIReply")
+                                .setLoadIndicator(CardService.LoadIndicator.SPINNER))
                     )
             )
             .build();
@@ -334,7 +317,7 @@ function onGenerateAIReply(e) {
                 .setParameters({
                     replyText: replyText
                 });
-            
+
             var responseSection = CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(replyText))
                 .addWidget(
@@ -355,7 +338,9 @@ function onGenerateAIReply(e) {
                     .addWidget(
                         CardService.newTextButton()
                             .setText("Try Again")
-                            .setOnClickAction(CardService.newAction().setFunctionName("onGenerateAIReply"))
+                            .setOnClickAction(CardService.newAction()
+                                .setFunctionName("onGenerateAIReply")
+                                .setLoadIndicator(CardService.LoadIndicator.SPINNER))
                     )
             )
             .build();
@@ -364,7 +349,7 @@ function onGenerateAIReply(e) {
 
 function onUseReply(e) {
     var replyText = e.parameters.replyText;
-    
+
     if (!replyText) {
         return CardService.newCardBuilder()
             .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
@@ -379,7 +364,7 @@ function onUseReply(e) {
         // REQUIRED: Set the access token to access the message
         var accessToken = e.gmail.accessToken;
         GmailApp.setCurrentMessageAccessToken(accessToken);
-        
+
         // Get the current message to reply to
         var messageId = e.gmail.messageId;
         if (!messageId) {
@@ -389,17 +374,17 @@ function onUseReply(e) {
                 .setGmailDraft(draft)
                 .build();
         }
-        
+
         var message = GmailApp.getMessageById(messageId);
-        
+
         // Create a draft reply with the AI-generated text
         var draft = message.createDraftReply(replyText);
-        
+
         // Return a ComposeActionResponse that opens this draft
         return CardService.newComposeActionResponseBuilder()
             .setGmailDraft(draft)
             .build();
-            
+
     } catch (err) {
         Logger.log('Error in onUseReply: ' + err.toString());
         return CardService.newCardBuilder()
@@ -415,7 +400,6 @@ function onUseReply(e) {
 }
 
 function onShowSettings(e) {
-    var userProps = PropertiesService.getUserProperties();
     var email = Session.getActiveUser().getEmail();
 
     return CardService.newCardBuilder()
@@ -428,52 +412,29 @@ function onShowSettings(e) {
         )
         .addSection(
             CardService.newCardSection()
-                .addWidget(CardService.newTextParagraph().setText("<b>Actions:</b>"))
                 .addWidget(
                     CardService.newTextButton()
-                        .setText("🔄 Refresh Connection")
-                        .setOnClickAction(CardService.newAction().setFunctionName("onRefreshConnection"))
-                )
-                .addWidget(
-                    CardService.newTextButton()
-                        .setText("🚪 Logout")
-                        .setOnClickAction(CardService.newAction().setFunctionName("onLogout"))
+                        .setText("⚙️ Open Full Settings")
+                        .setOpenLink(CardService.newOpenLink()
+                            .setUrl(FRONTEND_URL + '/settings')
+                            .setOpenAs(CardService.OpenAs.FULL_SIZE))
                 )
         )
         .build();
 }
 
-function onRefreshConnection(e) {
-    var userProps = PropertiesService.getUserProperties();
-    userProps.deleteProperty('jwtToken');
-
+function onUniversalSignOut(e) {
     return CardService.newCardBuilder()
-        .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
+        .setHeader(CardService.newCardHeader().setTitle("About Sign Out"))
         .addSection(
             CardService.newCardSection()
-                .addWidget(CardService.newTextParagraph().setText("✅ Connection refreshed! Please log in again."))
+                .addWidget(CardService.newTextParagraph().setText(
+                    "Email Assistant stays connected through your Google account, there is no traditional sign out. If you'd like to fully disconnect, you can uninstall the add-on or remove its permissions from your Google Account."
+                ))
                 .addWidget(
                     CardService.newTextButton()
-                        .setText("Login")
-                        .setOnClickAction(CardService.newAction().setFunctionName("onAddonLogin"))
-                )
-        )
-        .build();
-}
-
-function onLogout(e) {
-    var userProps = PropertiesService.getUserProperties();
-    userProps.deleteProperty('jwtToken');
-
-    return CardService.newCardBuilder()
-        .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
-        .addSection(
-            CardService.newCardSection()
-                .addWidget(CardService.newTextParagraph().setText("✅ Logged out successfully!"))
-                .addWidget(
-                    CardService.newTextButton()
-                        .setText("Login Again")
-                        .setOnClickAction(CardService.newAction().setFunctionName("onAddonLogin"))
+                        .setText("Manage Google Permissions")
+                        .setOpenLink(CardService.newOpenLink().setUrl("https://myaccount.google.com/permissions"))
                 )
         )
         .build();
