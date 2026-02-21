@@ -1,6 +1,7 @@
 var SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
 var SERVER_DOMAIN = SCRIPT_PROPERTIES.getProperty('SERVER_DOMAIN');
 var ADDON_SECRET = SCRIPT_PROPERTIES.getProperty('ADDON_SECRET');
+var FRONTEND_URL = SCRIPT_PROPERTIES.getProperty('FRONTEND_URL') || 'https://email-ai-assistant.netlify.app';
 
 function buildAddOn(e) {
     var cardBuilder = CardService.newCardBuilder();
@@ -21,7 +22,7 @@ function buildAddOn(e) {
                 .addWidget(
                     CardService.newTextButton()
                         .setText("Register Now")
-                        .setOpenLink(CardService.newOpenLink().setUrl("https://email-ai-assistant.netlify.app/register"))
+                        .setOpenLink(CardService.newOpenLink().setUrl(FRONTEND_URL + '/register'))
                 )
         );
         return cardBuilder.build();
@@ -229,7 +230,7 @@ function onGenerateAIReply(e) {
                     .addWidget(
                         CardService.newTextButton()
                             .setText("Register Now")
-                            .setOpenLink(CardService.newOpenLink().setUrl("https://email-ai-assistant.netlify.app/register"))
+                            .setOpenLink(CardService.newOpenLink().setUrl(FRONTEND_URL + '/register'))
                     )
             )
             .build();
