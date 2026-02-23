@@ -2,6 +2,17 @@
 
 This folder contains the source code for the Gmail Add-on that connects to your backend for AI-generated email responses.
 
+## Project Structure (Modular)
+
+Apps Script supports multiple files—all share a global scope, so no imports are needed. Using `.js` files (configured via clasp `fileExtension`).
+
+| File | Purpose |
+|------|---------|
+| **Config.js** | Script properties (SERVER_DOMAIN, FRONTEND_URL, etc.) |
+| **Api.js** | Backend API calls (e.g. `getUserInfo`) |
+| **Main.js** | Entry point – `buildAddOn` (homepage/contextual trigger) |
+| **Handlers.js** | Action handlers: `onGenerateAIReply`, `onUseReply`, `onShowSettings`, `onUniversalSignOut` |
+
 ## Setup Instructions
 
 1. **Install clasp (if not already):**

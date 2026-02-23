@@ -1,0 +1,90 @@
+/**
+ * API layer – backend communication for the Email Assistant add-on.
+ * Handles user lookup and organization verification.
+ */
+function getUserInfo(email, idToken) {
+    try {
+        if (!SERVER_DOMAIN) {
+            Logger.log("ERROR: SERVER_DOMAIN is not configured in script properties");
+            return { error: "Configuration error", message: "Server domain is not configured. Please check script properties." };
+        }
+
+        if (!idToken) {
+            Logger.log("ERROR: Google ID token is missing");
+            return { error: "Authentication error", message: "Failed to get Google ID token. Please try refreshing the add-on." };
+        }
+
+        Logger.log("User lookup request - Email: " + email + ", Server: " + SERVER_DOMAIN);
+        Logger.log("ID Token preview: " + (idToken ? idToken.substring(0, 20) + "..." : "null"));
+
+        var response = UrlFetchApp.fetch(
+            SERVER_DOMAIN + "/api/organizations/by-user-email?email=" + encodeURIComponent(email),
+            {
+                muteHttpExceptions: true,
+                headers: { Authorization: "Bearer " + idToken },
+            }
+        );
+        var code = response.getResponseCode();
+        var responseText = response.getContentText();
+
+        Logger.log("User lookup response code: " + code + " for email: " + email);
+        Logger.log("Response text: " + responseText.substring(0, 200));
+
+        if (code === 200) {
+            var responseData = JSON.parse(responseText);
+            Logger.log("User lookup successful response: " + JSON.stringify(responseData));
+            return responseData;
+        } else if (code === 404) {
+            // User is authenticated but not registered in our system
+            try {
+                var errorData = JSON.parse(responseText);
+                Logger.log("User not registered in system: " + JSON.stringify(errorData));
+                return { error: "User not registered", message: errorData.message || "User not found in Email Assistant database" };
+            } catch (parseErr) {
+                Logger.log("Error parsing 404 response: " + parseErr);
+                return { error: "User not registered", message: "User not found in Email Assistant database" };
+            }
+        } else if (code === 401) {
+            // Authentication failed
+            try {
+                var errorData = JSON.parse(responseText);
+                Logger.log("Authentication failed: " + JSON.stringify(errorData));
+                return {
+                    error: "Authentication failed",
+                    message: errorData.message || errorData.error || "Invalid Google ID token. Please check server configuration."
+                };
+            } catch (parseErr) {
+                Logger.log("Error parsing 401 response: " + parseErr);
+                return { error: "Authentication failed", message: "Invalid Google ID token" };
+            }
+        } else if (code === 500) {
+            // Server error
+            try {
+                var errorData = JSON.parse(responseText);
+                Logger.log("Server error: " + JSON.stringify(errorData));
+                return {
+                    error: "Server error",
+                    message: errorData.message || errorData.error || "Server configuration error. Please contact support."
+                };
+            } catch (parseErr) {
+                Logger.log("Error parsing 500 response: " + parseErr);
+                return { error: "Server error", message: "Internal server error" };
+            }
+        } else {
+            Logger.log("User lookup failed for " + email + " - HTTP " + code + ": " + responseText);
+            try {
+                var errorData = JSON.parse(responseText);
+                return {
+                    error: "Request failed",
+                    message: errorData.message || errorData.error || "Unexpected error (HTTP " + code + ")"
+                };
+            } catch (err) {
+                return { error: "Request failed", message: "Unexpected error (HTTP " + code + ")" };
+            }
+        }
+    } catch (err) {
+        Logger.log("Exception in user lookup for " + email + ": " + err.toString());
+        Logger.log("Exception stack: " + (err.stack || "No stack trace"));
+        return { error: "Exception", message: "Error connecting to server: " + err.toString() };
+    }
+}
