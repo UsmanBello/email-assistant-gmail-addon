@@ -4,20 +4,38 @@
  */
 function buildAddOn(e) {
     var cardBuilder = CardService.newCardBuilder()
-        .setHeader(CardService.newCardHeader().setTitle("Email Assistant"));
+        .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"));
 
     var email = Session.getActiveUser().getEmail();
     var idToken = ScriptApp.getIdentityToken();
+
+    if (!email || !idToken) {
+        return CardService.newCardBuilder()
+            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
+            .addSection(
+                CardService.newCardSection()
+                    .addWidget(CardService.newTextParagraph().setText(
+                        "⚠️ Unable to verify your Google account identity. This typically happens with custom domain (Google Workspace) accounts where the admin has restricted Apps Script access. Please ask your Google Workspace admin to allow Apps Script identity access, or contact support."
+                    ))
+                    .addWidget(
+                        CardService.newTextButton()
+                            .setText("Try Again")
+                            .setOnClickAction(CardService.newAction().setFunctionName("buildAddOn"))
+                    )
+            )
+            .build();
+    }
+
     var userInfo = getUserInfo(email, idToken);
-    Logger.log('buildAddOn: User info received: ' + JSON.stringify(userInfo));
+    Logger.log('buildAddOn: User info received - keys: ' + (userInfo ? Object.keys(userInfo).join(', ') : 'null'));
 
     // Check if user is not registered in our system
     if (userInfo && userInfo.error === "User not registered") {
-        Logger.log('buildAddOn: User not registered in Email Assistant system');
+        Logger.log('buildAddOn: User not registered in ReplAI - Email Assistant system');
         cardBuilder.addSection(
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(
-                    "Welcome! You need to register with Email Assistant before using this add-on."
+                    "Welcome! You need to register with ReplAI - Email Assistant before using this add-on."
                 ))
                 .addWidget(
                     CardService.newTextButton()
@@ -30,7 +48,7 @@ function buildAddOn(e) {
 
     // Check for other errors (authentication failures, etc.)
     if (!userInfo || userInfo.error || (!userInfo.organizationId && !userInfo.userId)) {
-        Logger.log('buildAddOn: User authentication failed - userInfo: ' + JSON.stringify(userInfo));
+        Logger.log('buildAddOn: User authentication failed - keys: ' + (userInfo ? Object.keys(userInfo).join(', ') : 'null'));
         cardBuilder.addSection(
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(

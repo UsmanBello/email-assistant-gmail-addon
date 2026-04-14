@@ -10,19 +10,37 @@
 function onGenerateAIReply(e) {
     var email = Session.getActiveUser().getEmail();
     var idToken = ScriptApp.getIdentityToken();
-    Logger.log('Google ID Token (for backend verification): ' + idToken);
+
+    if (!email || !idToken) {
+        return CardService.newCardBuilder()
+            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
+            .addSection(
+                CardService.newCardSection()
+                    .addWidget(CardService.newTextParagraph().setText(
+                        "⚠️ Unable to verify your Google account identity. This typically happens with custom domain (Google Workspace) accounts where the admin has restricted Apps Script access. Please ask your Google Workspace admin to allow Apps Script identity access, or contact support."
+                    ))
+                    .addWidget(
+                        CardService.newTextButton()
+                            .setText("Try Again")
+                            .setOnClickAction(CardService.newAction().setFunctionName("buildAddOn"))
+                    )
+            )
+            .build();
+    }
+
+    Logger.log('Google ID Token (for backend verification) preview: ' + (idToken ? idToken.substring(0, 20) + '...' : 'null'));
     var userInfo = null;
     userInfo = getUserInfo(email, idToken);
-    Logger.log('AI Reply: User info received: ' + JSON.stringify(userInfo));
+    Logger.log('AI Reply: User info received - keys: ' + (userInfo ? Object.keys(userInfo).join(', ') : 'null'));
 
     // Check if user is not registered in our system
     if (userInfo && userInfo.error === "User not registered") {
-        Logger.log('AI Reply: User not registered in Email Assistant system');
+        Logger.log('AI Reply: User not registered in ReplAI - Email Assistant system');
         return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
+            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
             .addSection(
                 CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText("Please register with Email Assistant first to use AI reply generation."))
+                    .addWidget(CardService.newTextParagraph().setText("Please register with ReplAI - Email Assistant first to use AI reply generation."))
                     .addWidget(
                         CardService.newTextButton()
                             .setText("Register Now")
@@ -34,9 +52,9 @@ function onGenerateAIReply(e) {
 
     // Check for other errors (authentication failures, etc.)
     if (!userInfo || userInfo.error || (!userInfo.organizationId && !userInfo.userId)) {
-        Logger.log('AI Reply: User authentication failed - userInfo: ' + JSON.stringify(userInfo));
+        Logger.log('AI Reply: User authentication failed - keys: ' + (userInfo ? Object.keys(userInfo).join(', ') : 'null'));
         return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
+            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
             .addSection(
                 CardService.newCardSection()
                     .addWidget(CardService.newTextParagraph().setText("Authentication error. Please try again."))
@@ -90,7 +108,7 @@ function onGenerateAIReply(e) {
         Logger.log('AI Reply: Backend response code: ' + code);
         if (code === 200) {
             var data = JSON.parse(response.getContentText());
-            Logger.log('AI Reply: Backend response data: ' + JSON.stringify(data));
+            Logger.log('AI Reply: Backend response data keys: ' + (data ? Object.keys(data).join(', ') : 'null'));
             if (data.responses && data.responses.length > 0) {
                 aiReplies = data.responses.map(function (r) { return r.content || r; });
             } else {
@@ -99,7 +117,7 @@ function onGenerateAIReply(e) {
             }
         } else {
             var errorResponse = response.getContentText();
-            Logger.log('AI Reply: Error response from backend: ' + errorResponse);
+            Logger.log('AI Reply: Error response from backend (preview): ' + (errorResponse ? errorResponse.substring(0, 100) + '...' : 'empty'));
 
             try {
                 var errorData = JSON.parse(errorResponse);
@@ -144,7 +162,7 @@ function onGenerateAIReply(e) {
         return cardBuilder.build();
     } else {
         return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
+            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
             .addSection(
                 CardService.newCardSection()
                     .addWidget(CardService.newTextParagraph().setText(errorMsg || "AI reply generation failed."))
@@ -169,7 +187,7 @@ function onUseReply(e) {
 
     if (!replyText) {
         return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
+            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
             .addSection(
                 CardService.newCardSection()
                     .addWidget(CardService.newTextParagraph().setText("Error: No reply text provided."))
@@ -199,7 +217,7 @@ function onUseReply(e) {
     } catch (err) {
         Logger.log('Error in onUseReply: ' + err.toString());
         return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("Email Assistant"))
+            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
             .addSection(
                 CardService.newCardSection()
                     .addWidget(CardService.newTextParagraph().setText(
@@ -217,7 +235,7 @@ function onShowSettings(e) {
     var email = Session.getActiveUser().getEmail();
 
     return CardService.newCardBuilder()
-        .setHeader(CardService.newCardHeader().setTitle("Email Assistant Settings"))
+        .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant Settings"))
         .addSection(
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText("<b>User Information:</b>"))
@@ -246,7 +264,7 @@ function onUniversalSignOut(e) {
         .addSection(
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(
-                    "Email Assistant stays connected through your Google account, there is no traditional sign out. If you'd like to fully disconnect, you can uninstall the add-on or remove its permissions from your Google Account."
+                    "ReplAI - Email Assistant stays connected through your Google account, there is no traditional sign out. If you'd like to fully disconnect, you can uninstall the add-on or remove its permissions from your Google Account."
                 ))
                 .addWidget(
                     CardService.newTextButton()

@@ -14,7 +14,7 @@ function getUserInfo(email, idToken) {
             return { error: "Authentication error", message: "Failed to get Google ID token. Please try refreshing the add-on." };
         }
 
-        Logger.log("User lookup request - Email: " + email + ", Server: " + SERVER_DOMAIN);
+        Logger.log("User lookup request - Email: " + (email ? email.substring(0, 2) + "***@" + (email.indexOf("@") >= 0 ? email.substring(email.indexOf("@")) : "") : "null") + ", Server: " + SERVER_DOMAIN);
         Logger.log("ID Token preview: " + (idToken ? idToken.substring(0, 20) + "..." : "null"));
 
         var response = UrlFetchApp.fetch(
@@ -27,28 +27,30 @@ function getUserInfo(email, idToken) {
         var code = response.getResponseCode();
         var responseText = response.getContentText();
 
-        Logger.log("User lookup response code: " + code + " for email: " + email);
-        Logger.log("Response text: " + responseText.substring(0, 200));
+        Logger.log("User lookup response code: " + code + " for email: " + (email ? email.substring(0, 2) + "***@" + (email.indexOf("@") >= 0 ? email.substring(email.indexOf("@")) : "") : "null"));
+        if (code !== 200 && code !== 404 && code !== 401 && code !== 500) {
+            Logger.log("Response preview: " + (responseText ? responseText.substring(0, 80) + "..." : "empty"));
+        }
 
         if (code === 200) {
             var responseData = JSON.parse(responseText);
-            Logger.log("User lookup successful response: " + JSON.stringify(responseData));
+            Logger.log("User lookup successful - keys: " + Object.keys(responseData).join(", "));
             return responseData;
         } else if (code === 404) {
             // User is authenticated but not registered in our system
             try {
                 var errorData = JSON.parse(responseText);
-                Logger.log("User not registered in system: " + JSON.stringify(errorData));
-                return { error: "User not registered", message: errorData.message || "User not found in Email Assistant database" };
+                Logger.log("User not registered in system");
+                return { error: "User not registered", message: errorData.message || "User not found in ReplAI - Email Assistant database" };
             } catch (parseErr) {
                 Logger.log("Error parsing 404 response: " + parseErr);
-                return { error: "User not registered", message: "User not found in Email Assistant database" };
+                return { error: "User not registered", message: "User not found in ReplAI - Email Assistant database" };
             }
         } else if (code === 401) {
             // Authentication failed
             try {
                 var errorData = JSON.parse(responseText);
-                Logger.log("Authentication failed: " + JSON.stringify(errorData));
+                Logger.log("Authentication failed");
                 return {
                     error: "Authentication failed",
                     message: errorData.message || errorData.error || "Invalid Google ID token. Please check server configuration."
@@ -61,7 +63,7 @@ function getUserInfo(email, idToken) {
             // Server error
             try {
                 var errorData = JSON.parse(responseText);
-                Logger.log("Server error: " + JSON.stringify(errorData));
+                Logger.log("Server error");
                 return {
                     error: "Server error",
                     message: errorData.message || errorData.error || "Server configuration error. Please contact support."
@@ -71,7 +73,7 @@ function getUserInfo(email, idToken) {
                 return { error: "Server error", message: "Internal server error" };
             }
         } else {
-            Logger.log("User lookup failed for " + email + " - HTTP " + code + ": " + responseText);
+            Logger.log("User lookup failed for " + (email ? email.substring(0, 2) + "***@" + (email.indexOf("@") >= 0 ? email.substring(email.indexOf("@")) : "") : "null") + " - HTTP " + code);
             try {
                 var errorData = JSON.parse(responseText);
                 return {
@@ -83,8 +85,7 @@ function getUserInfo(email, idToken) {
             }
         }
     } catch (err) {
-        Logger.log("Exception in user lookup for " + email + ": " + err.toString());
-        Logger.log("Exception stack: " + (err.stack || "No stack trace"));
+        Logger.log("Exception in user lookup: " + err.toString());
         return { error: "Exception", message: "Error connecting to server: " + err.toString() };
     }
 }
