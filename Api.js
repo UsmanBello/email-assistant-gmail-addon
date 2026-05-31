@@ -86,6 +86,41 @@ function getUserInfo(email, idToken) {
         }
     } catch (err) {
         Logger.log("Exception in user lookup: " + err.toString());
-        return { error: "Exception", message: "Error connecting to server: " + err.toString() };
+        return { error: "Exception", message: "Error connecting to server. Please try again." };
+    }
+}
+
+/**
+ * Calls the backend universal sign-out endpoint. The backend verifies the
+ * Google ID token, revokes the Google OAuth grant, and clears stored tokens.
+ * Best-effort: returns { ok: bool, code: number } and never throws.
+ */
+function revokeBackendSession(idToken) {
+    try {
+        if (!SERVER_DOMAIN) {
+            Logger.log("Sign-out: SERVER_DOMAIN not configured");
+            return { ok: false, code: 0 };
+        }
+        if (!idToken) {
+            Logger.log("Sign-out: no ID token available");
+            return { ok: false, code: 0 };
+        }
+
+        var response = UrlFetchApp.fetch(
+            SERVER_DOMAIN + "/api/users/addon/signout",
+            {
+                method: "post",
+                contentType: "application/json",
+                payload: "{}",
+                muteHttpExceptions: true,
+                headers: { Authorization: "Bearer " + idToken },
+            }
+        );
+        var code = response.getResponseCode();
+        Logger.log("Sign-out: backend response code " + code);
+        return { ok: code === 200, code: code };
+    } catch (err) {
+        Logger.log("Sign-out: exception calling backend: " + err.toString());
+        return { ok: false, code: 0 };
     }
 }

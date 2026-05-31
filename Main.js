@@ -72,6 +72,9 @@ function buildAddOn(e) {
 
     // If in email context, show email info and Generate button
     if (e && e.gmail && e.gmail.messageId) {
+        if (e.gmail.accessToken) {
+            GmailApp.setCurrentMessageAccessToken(e.gmail.accessToken);
+        }
         var message = GmailApp.getMessageById(e.gmail.messageId);
         var subject = message.getSubject();
         var from = message.getFrom();

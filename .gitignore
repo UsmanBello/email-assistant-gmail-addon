@@ -1,1 +1,4 @@
 .env
+.clasp.json
+# Codebase-snapshot dumps (generated, not source)
+APP_SCRIPT*.txt

@@ -75,6 +75,9 @@ function onGenerateAIReply(e) {
         if (e && e.gmail && e.gmail.messageId) {
             messageId = e.gmail.messageId;
             threadId = e.gmail.threadId || '';
+            if (e.gmail.accessToken) {
+                GmailApp.setCurrentMessageAccessToken(e.gmail.accessToken);
+            }
             var message = GmailApp.getMessageById(messageId);
             subject = message.getSubject();
             from = message.getFrom();
@@ -119,21 +122,23 @@ function onGenerateAIReply(e) {
             var errorResponse = response.getContentText();
             Logger.log('AI Reply: Error response from backend (preview): ' + (errorResponse ? errorResponse.substring(0, 100) + '...' : 'empty'));
 
-            try {
-                var errorData = JSON.parse(errorResponse);
-                if (errorData.error && errorData.error.includes('429')) {
-                    errorMsg = "OpenAI quota exceeded. Please check your billing or try again later.";
-                } else if (errorData.message) {
-                    errorMsg = "AI reply generation failed: " + errorData.message;
-                } else {
-                    errorMsg = "AI reply generation failed. Please try again.";
-                }
-            } catch (parseError) {
+            // Show only code-driven, generic messages keyed off HTTP status / typed
+            // error codes. Never interpolate backend-controlled strings into the UI
+            // — a poisoned upstream response could otherwise drop unexpected text
+            // (or characters that confuse the card renderer) into the add-on UI.
+            if (code === 401 || code === 403) {
+                errorMsg = "You need to sign in again to generate replies.";
+            } else if (code === 429) {
+                errorMsg = "Reply quota reached. Please try again later.";
+            } else if (code >= 500) {
+                errorMsg = "AI reply service is temporarily unavailable. Please try again.";
+            } else {
                 errorMsg = "AI reply generation failed. Please try again.";
             }
         }
     } catch (err) {
-        errorMsg = "Error generating AI reply: " + err;
+        // Never show internal error strings in the UI (can leak details / be user-controlled).
+        errorMsg = "AI reply generation failed. Please try again.";
         Logger.log('AI Reply: Exception during backend call: ' + err);
     }
 
@@ -165,7 +170,7 @@ function onGenerateAIReply(e) {
             .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
             .addSection(
                 CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText(errorMsg || "AI reply generation failed."))
+                    .addWidget(CardService.newTextParagraph().setText(errorMsg || "AI reply generation failed. Please try again."))
                     .addWidget(
                         CardService.newTextButton()
                             .setText("Try Again")
@@ -215,13 +220,15 @@ function onUseReply(e) {
             .build();
 
     } catch (err) {
+        // Internal error details are logged for debugging only — never surfaced
+        // to the user (avoids leaking Apps Script stack frames / file paths).
         Logger.log('Error in onUseReply: ' + err.toString());
         return CardService.newCardBuilder()
             .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
             .addSection(
                 CardService.newCardSection()
                     .addWidget(CardService.newTextParagraph().setText(
-                        "Error creating reply draft: " + err.toString()
+                        "Could not create reply draft. Please try again."
                     ))
             )
             .build();
@@ -257,14 +264,28 @@ function onShowSettings(e) {
 
 /**
  * Universal action: Sign out. Called from the add-on's "More actions" menu.
+ * Calls the backend to revoke the Google OAuth grant and clear stored tokens,
+ * then surfaces the result to the user.
  */
 function onUniversalSignOut(e) {
+    var idToken = null;
+    try { idToken = ScriptApp.getIdentityToken(); } catch (err) {
+        Logger.log("Sign-out: getIdentityToken failed: " + err);
+    }
+
+    var result = revokeBackendSession(idToken);
+
+    var statusText = result.ok
+        ? "✅ You have been signed out. Your ReplAI session and Google authorization have been revoked."
+        : "⚠️ We couldn't fully revoke your session right now. You can finish signing out by removing ReplAI's access from your Google Account.";
+
     return CardService.newCardBuilder()
-        .setHeader(CardService.newCardHeader().setTitle("About Sign Out"))
+        .setHeader(CardService.newCardHeader().setTitle("Sign Out"))
         .addSection(
             CardService.newCardSection()
+                .addWidget(CardService.newTextParagraph().setText(statusText))
                 .addWidget(CardService.newTextParagraph().setText(
-                    "ReplAI - Email Assistant stays connected through your Google account, there is no traditional sign out. If you'd like to fully disconnect, you can uninstall the add-on or remove its permissions from your Google Account."
+                    "To fully disconnect ReplAI - Email Assistant from your Google Account, you can also uninstall the add-on or remove its permissions below."
                 ))
                 .addWidget(
                     CardService.newTextButton()

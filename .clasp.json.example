@@ -1,0 +1,5 @@
+{
+  "scriptId": "YOUR_APPS_SCRIPT_ID_FROM_SCRIPT_PROPERTIES_OR_CLASP_CREATE",
+  "rootDir": ".",
+  "fileExtension": "js"
+}
