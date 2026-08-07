@@ -128,6 +128,8 @@ function onGenerateAIReply(e) {
             // (or characters that confuse the card renderer) into the add-on UI.
             if (code === 401 || code === 403) {
                 errorMsg = "You need to sign in again to generate replies.";
+            } else if (code === 402) {
+                errorMsg = "Your free trial has ended. Add billing at replai.us to keep generating replies.";
             } else if (code === 429) {
                 errorMsg = "Reply quota reached. Please try again later.";
             } else if (code >= 500) {
