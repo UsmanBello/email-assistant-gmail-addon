@@ -122,5 +122,33 @@ function buildAddOn(e) {
         );
     }
 
+    cardBuilder.addSection(buildShortcutsSection());
+
     return cardBuilder.build();
+}
+
+/**
+ * Quick links into the ReplAI back office (knowledge base + AI response settings).
+ * URLs must stay within the manifest's openLinkUrlPrefixes.
+ */
+function buildShortcutsSection() {
+    return CardService.newCardSection()
+        .setHeader("Quick links")
+        .addWidget(
+            CardService.newButtonSet()
+                .addButton(
+                    CardService.newTextButton()
+                        .setText("📚 Knowledge Base")
+                        .setOpenLink(CardService.newOpenLink()
+                            .setUrl(FRONTEND_URL + '/knowledge-base')
+                            .setOpenAs(CardService.OpenAs.FULL_SIZE))
+                )
+                .addButton(
+                    CardService.newTextButton()
+                        .setText("⚙️ AI Response Settings")
+                        .setOpenLink(CardService.newOpenLink()
+                            .setUrl(FRONTEND_URL + '/ai-response-settings')
+                            .setOpenAs(CardService.OpenAs.FULL_SIZE))
+                )
+        );
 }

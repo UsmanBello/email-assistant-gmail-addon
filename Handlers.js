@@ -291,6 +291,8 @@ function onGenerateAIReply(e) {
             cardBuilder.addSection(responseSection);
         }
 
+        cardBuilder.addSection(buildShortcutsSection());
+
         return cardBuilder.build();
     } else {
         return buildInfoCard(
