@@ -66,8 +66,9 @@ function buildAddOn(e) {
 
     Logger.log('buildAddOn: User authentication successful - userType: ' + userInfo.userType);
 
-    // Dynamic header: "Select Email" when no email chosen, "Selected Email" when viewing one
-    var headerTitle = (e && e.gmail && e.gmail.messageId) ? "Selected Email" : "Select Email";
+    // A completely headerless card can render blank in Gmail, so the homepage
+    // gets the app name instead of the old "Select Email" label.
+    var headerTitle = (e && e.gmail && e.gmail.messageId) ? "Selected Email" : "ReplAI - Email Assistant";
     cardBuilder = CardService.newCardBuilder()
         .setHeader(CardService.newCardHeader().setTitle(headerTitle));
 
@@ -104,7 +105,8 @@ function buildAddOn(e) {
                 )
         );
     } else {
-        // Not in email context - show instruction message
+        // Not in email context - quick links first, then the instruction message
+        cardBuilder.addSection(buildShortcutsSection());
         cardBuilder.addSection(
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(
@@ -122,7 +124,10 @@ function buildAddOn(e) {
         );
     }
 
-    cardBuilder.addSection(buildShortcutsSection());
+    // In email context the reply flow stays primary, so quick links go last.
+    if (e && e.gmail && e.gmail.messageId) {
+        cardBuilder.addSection(buildShortcutsSection());
+    }
 
     return cardBuilder.build();
 }
