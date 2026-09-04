@@ -3,6 +3,99 @@
  * These functions are triggered by button clicks and universal actions (manifest).
  */
 
+// How much of a conversation to send. The backend independently keeps only the
+// newest turns, so these bounds exist to keep the request payload sane.
+var MAX_THREAD_MESSAGES = 15;
+var MAX_MESSAGE_BODY_CHARS = 6000;
+
+/**
+ * Collects the whole conversation around the open message.
+ *
+ * The backend decides which message to reply to (the newest one not sent by this
+ * user), so it needs the full thread — not just whichever message happens to be
+ * open. Sending only the open message is what previously let the assistant reply
+ * to the user's own words.
+ *
+ * Falls back to the single open message if the thread cannot be read, so a reply
+ * is still drafted rather than the whole action failing.
+ *
+ * @returns {{messages: Array, usedThread: Boolean}}
+ */
+function collectThreadMessages(message) {
+    var toPayload = function (msg) {
+        var body = '';
+        try {
+            body = msg.getPlainBody() || '';
+        } catch (err) {
+            Logger.log('collectThreadMessages: body read failed: ' + err);
+        }
+        if (body.length > MAX_MESSAGE_BODY_CHARS) {
+            body = body.substring(0, MAX_MESSAGE_BODY_CHARS);
+        }
+        return {
+            id: msg.getId(),
+            from: msg.getFrom() || '',
+            to: msg.getTo() || '',
+            cc: msg.getCc() || '',
+            subject: msg.getSubject() || '',
+            date: msg.getDate() ? msg.getDate().toUTCString() : '',
+            timestamp: msg.getDate() ? msg.getDate().getTime() : null,
+            body: body
+        };
+    };
+
+    try {
+        var thread = message.getThread();
+        var messages = thread.getMessages();
+
+        // Keep the newest MAX_THREAD_MESSAGES; older context is the first to drop.
+        if (messages.length > MAX_THREAD_MESSAGES) {
+            messages = messages.slice(messages.length - MAX_THREAD_MESSAGES);
+        }
+
+        var payload = [];
+        for (var i = 0; i < messages.length; i++) {
+            payload.push(toPayload(messages[i]));
+        }
+        Logger.log('AI Reply: collected ' + payload.length + ' thread message(s)');
+        return { messages: payload, usedThread: true };
+    } catch (err) {
+        // Most likely cause is the granted scopes not permitting a thread read.
+        // Degrade to the open message instead of failing the whole action.
+        Logger.log('AI Reply: thread read unavailable, using open message only: ' + err);
+        try {
+            return { messages: [toPayload(message)], usedThread: false };
+        } catch (inner) {
+            Logger.log('AI Reply: open message read also failed: ' + inner);
+            return { messages: [], usedThread: false };
+        }
+    }
+}
+
+/**
+ * Builds a simple informational card. Text is always code-supplied, never
+ * interpolated from a backend response.
+ */
+function buildInfoCard(title, bodyText, retryFunctionName) {
+    var section = CardService.newCardSection()
+        .addWidget(CardService.newTextParagraph().setText(bodyText));
+
+    if (retryFunctionName) {
+        section.addWidget(
+            CardService.newTextButton()
+                .setText("Try Again")
+                .setOnClickAction(CardService.newAction()
+                    .setFunctionName(retryFunctionName)
+                    .setLoadIndicator(CardService.LoadIndicator.SPINNER))
+        );
+    }
+
+    return CardService.newCardBuilder()
+        .setHeader(CardService.newCardHeader().setTitle(title))
+        .addSection(section)
+        .build();
+}
+
 /**
  * Generates AI reply suggestions via the backend API.
  * Called when user clicks "Generate AI Reply".
@@ -57,7 +150,10 @@ function onGenerateAIReply(e) {
             .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
             .addSection(
                 CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText("Authentication error. Please try again."))
+                    .addWidget(CardService.newTextParagraph().setText(
+                        "Authentication error. Please try again." +
+                        (userInfo && userInfo.message ? "<br><br><i>Details: " + userInfo.message + "</i>" : "")
+                    ))
                     .addWidget(
                         CardService.newTextButton()
                             .setText("Try Again")
@@ -69,8 +165,10 @@ function onGenerateAIReply(e) {
             .build();
     }
 
-    // Extract email context
+    // Extract email context. We send the whole conversation, not just the open
+    // message — the backend picks the reply target from it.
     var subject = '', from = '', body = '', threadId = '', messageId = '';
+    var threadMessages = [];
     try {
         if (e && e.gmail && e.gmail.messageId) {
             messageId = e.gmail.messageId;
@@ -82,6 +180,9 @@ function onGenerateAIReply(e) {
             subject = message.getSubject();
             from = message.getFrom();
             body = message.getPlainBody();
+
+            var collected = collectThreadMessages(message);
+            threadMessages = collected.messages;
         }
     } catch (err) {
         Logger.log('AI Reply: Error extracting email context: ' + err);
@@ -90,6 +191,10 @@ function onGenerateAIReply(e) {
     // Call backend to generate AI reply using the add-on specific endpoint
     var aiReplies = [];
     var errorMsg = '';
+    var infoMsg = '';
+    // The message the backend chose to answer — the newest one not sent by this
+    // user. Drafts are threaded onto this, not onto whatever the user had open.
+    var replyToMessageId = '';
     try {
         var response = UrlFetchApp.fetch(
             SERVER_DOMAIN + "/api/responses/generate-addon",
@@ -97,6 +202,9 @@ function onGenerateAIReply(e) {
                 method: "post",
                 contentType: "application/json",
                 payload: JSON.stringify({
+                    // Full conversation: the backend selects the reply target from it.
+                    threadMessages: threadMessages,
+                    // Retained so an older backend build still behaves as before.
                     emailContent: body,
                     subject: subject,
                     from: from,
@@ -112,7 +220,17 @@ function onGenerateAIReply(e) {
         if (code === 200) {
             var data = JSON.parse(response.getContentText());
             Logger.log('AI Reply: Backend response data keys: ' + (data ? Object.keys(data).join(', ') : 'null'));
-            if (data.responses && data.responses.length > 0) {
+
+            if (data.replyTo && typeof data.replyTo.messageId === 'string') {
+                replyToMessageId = data.replyTo.messageId;
+            }
+
+            if (data.status === 'nothing_to_reply_to') {
+                // Everything in this conversation was sent by the user, so there is
+                // no incoming message to answer. Not an error — explain it instead.
+                infoMsg = "There's no message from anyone else in this conversation yet, so there's nothing to reply to.";
+                Logger.log('AI Reply: no incoming message in thread.');
+            } else if (data.responses && data.responses.length > 0) {
                 aiReplies = data.responses.map(function (r) { return r.content || r; });
             } else {
                 errorMsg = "No AI reply generated.";
@@ -144,6 +262,11 @@ function onGenerateAIReply(e) {
         Logger.log('AI Reply: Exception during backend call: ' + err);
     }
 
+    if (infoMsg) {
+        // Informational, not a failure — no "Try Again" button.
+        return buildInfoCard("ReplAI - Email Assistant", infoMsg, null);
+    }
+
     if (aiReplies.length > 0) {
         var cardBuilder = CardService.newCardBuilder()
             .setHeader(CardService.newCardHeader().setTitle("AI Suggested Replies"));
@@ -153,7 +276,9 @@ function onGenerateAIReply(e) {
             var composeAction = CardService.newAction()
                 .setFunctionName("onUseReply")
                 .setParameters({
-                    replyText: replyText
+                    replyText: replyText,
+                    // Action parameters must be strings.
+                    replyToMessageId: replyToMessageId || ''
                 });
 
             var responseSection = CardService.newCardSection()
@@ -168,20 +293,11 @@ function onGenerateAIReply(e) {
 
         return cardBuilder.build();
     } else {
-        return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
-            .addSection(
-                CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText(errorMsg || "AI reply generation failed. Please try again."))
-                    .addWidget(
-                        CardService.newTextButton()
-                            .setText("Try Again")
-                            .setOnClickAction(CardService.newAction()
-                                .setFunctionName("onGenerateAIReply")
-                                .setLoadIndicator(CardService.LoadIndicator.SPINNER))
-                    )
-            )
-            .build();
+        return buildInfoCard(
+            "ReplAI - Email Assistant",
+            errorMsg || "AI reply generation failed. Please try again.",
+            "onGenerateAIReply"
+        );
     }
 }
 
@@ -193,28 +309,48 @@ function onUseReply(e) {
     var replyText = e.parameters.replyText;
 
     if (!replyText) {
-        return CardService.newCardBuilder()
-            .setHeader(CardService.newCardHeader().setTitle("ReplAI - Email Assistant"))
-            .addSection(
-                CardService.newCardSection()
-                    .addWidget(CardService.newTextParagraph().setText("Error: No reply text provided."))
-            )
-            .build();
+        return buildInfoCard("ReplAI - Email Assistant", "Error: No reply text provided.", null);
     }
 
     try {
         var accessToken = e.gmail.accessToken;
         GmailApp.setCurrentMessageAccessToken(accessToken);
 
-        var messageId = e.gmail.messageId;
-        if (!messageId) {
-            var draft = GmailApp.createDraft('', '', replyText);
+        // Draft against the message the reply was actually written for — the
+        // latest message from the other party — falling back to the open message.
+        // Without this, opening an older message (or the user's own last message)
+        // would thread the draft onto the wrong one.
+        var targetId = e.parameters.replyToMessageId || '';
+        var openId = e.gmail.messageId;
+
+        if (!targetId && !openId) {
+            var blankDraft = GmailApp.createDraft('', '', replyText);
             return CardService.newComposeActionResponseBuilder()
-                .setGmailDraft(draft)
+                .setGmailDraft(blankDraft)
                 .build();
         }
 
-        var message = GmailApp.getMessageById(messageId);
+        var message = null;
+        if (targetId) {
+            try {
+                message = GmailApp.getMessageById(targetId);
+            } catch (targetErr) {
+                Logger.log('onUseReply: could not open target message, falling back: ' + targetErr);
+            }
+        }
+        if (!message && openId) {
+            message = GmailApp.getMessageById(openId);
+        }
+
+        // Target unreadable and no open message to fall back to: still hand the
+        // user their text as a plain draft rather than losing it.
+        if (!message) {
+            var looseDraft = GmailApp.createDraft('', '', replyText);
+            return CardService.newComposeActionResponseBuilder()
+                .setGmailDraft(looseDraft)
+                .build();
+        }
+
         var draft = message.createDraftReply(replyText);
 
         return CardService.newComposeActionResponseBuilder()

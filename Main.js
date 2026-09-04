@@ -52,7 +52,8 @@ function buildAddOn(e) {
         cardBuilder.addSection(
             CardService.newCardSection()
                 .addWidget(CardService.newTextParagraph().setText(
-                    "Authentication error. Please try refreshing the addon."
+                    "Authentication error. Please try refreshing the addon." +
+                    (userInfo && userInfo.message ? "<br><br><i>Details: " + userInfo.message + "</i>" : "")
                 ))
                 .addWidget(
                     CardService.newTextButton()
