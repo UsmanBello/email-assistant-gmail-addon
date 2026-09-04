@@ -72,6 +72,9 @@ function buildAddOn(e) {
     cardBuilder = CardService.newCardBuilder()
         .setHeader(CardService.newCardHeader().setTitle(headerTitle));
 
+    // Quick links always come first, on every card.
+    cardBuilder.addSection(buildShortcutsSection());
+
     // If in email context, show email info and Generate button
     if (e && e.gmail && e.gmail.messageId) {
         if (e.gmail.accessToken) {
@@ -105,28 +108,29 @@ function buildAddOn(e) {
                 )
         );
     } else {
-        // Not in email context - quick links first, then the instruction message
-        cardBuilder.addSection(buildShortcutsSection());
+        // Not in email context - offer the two entry points.
         cardBuilder.addSection(
             CardService.newCardSection()
+                .setHeader("What would you like to do?")
+                .addWidget(
+                    CardService.newTextButton()
+                        .setText("✍️ Compose New Email")
+                        .setOnClickAction(CardService.newAction()
+                            .setFunctionName("onShowComposeForm"))
+                )
                 .addWidget(CardService.newTextParagraph().setText(
-                    '<div style="text-align: center; margin-bottom: 50px;">' +
-                    '<font color="#333">To get started, please <b>select an email message</b> from your inbox that you\'d like to generate an AI reply for.</font>' +
-                    '</div>'
+                    '<font color="#555" size="2">Describe what you want to say and get a polished, ready-to-send draft.</font>'
                 ))
+                .addWidget(
+                    CardService.newTextButton()
+                        .setText("↩️ Reply to an Email")
+                        .setOnClickAction(CardService.newAction()
+                            .setFunctionName("onShowReplyHelp"))
+                )
                 .addWidget(CardService.newTextParagraph().setText(
-                    '<table width="100%" cellpadding="12" cellspacing="0" style="background-color: #e8f4fd; border-radius: 6px; border: 1px solid #b3ddf2;">' +
-                    '<tr><td>' +
-                    '<font color="#0a7ea4"><b>💡 Tip:</b> <i>Click on any email in your inbox, then open this add-on to see the AI reply options.</i></font>' +
-                    '</td></tr>' +
-                    '</table>'
+                    '<font color="#555" size="2">Open an email from your inbox and get AI reply suggestions for it.</font>'
                 ))
         );
-    }
-
-    // In email context the reply flow stays primary, so quick links go last.
-    if (e && e.gmail && e.gmail.messageId) {
-        cardBuilder.addSection(buildShortcutsSection());
     }
 
     return cardBuilder.build();

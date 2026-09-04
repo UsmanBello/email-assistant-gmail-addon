@@ -165,6 +165,13 @@ function onGenerateAIReply(e) {
             .build();
     }
 
+    // Optional adjustment typed into the results card's refine box ("make it
+    // shorter"). Present only when this call is a Regenerate.
+    var instruction = '';
+    if (e && e.formInput && e.formInput.refineInstruction) {
+        instruction = String(e.formInput.refineInstruction).substring(0, 1000);
+    }
+
     // Extract email context. We send the whole conversation, not just the open
     // message — the backend picks the reply target from it.
     var subject = '', from = '', body = '', threadId = '', messageId = '';
@@ -209,7 +216,9 @@ function onGenerateAIReply(e) {
                     subject: subject,
                     from: from,
                     threadId: threadId,
-                    messageId: messageId
+                    messageId: messageId,
+                    // The user's own steering for this generation; empty on first run.
+                    instruction: instruction
                 }),
                 muteHttpExceptions: true,
                 headers: { Authorization: "Bearer " + idToken },
@@ -271,6 +280,9 @@ function onGenerateAIReply(e) {
         var cardBuilder = CardService.newCardBuilder()
             .setHeader(CardService.newCardHeader().setTitle("AI Suggested Replies"));
 
+        // Quick links always come first, on every card.
+        cardBuilder.addSection(buildShortcutsSection());
+
         for (var i = 0; i < aiReplies.length; i++) {
             var replyText = aiReplies[i];
             var composeAction = CardService.newAction()
@@ -291,7 +303,31 @@ function onGenerateAIReply(e) {
             cardBuilder.addSection(responseSection);
         }
 
-        cardBuilder.addSection(buildShortcutsSection());
+        // Refine box: type an adjustment and regenerate. The typed value comes
+        // back to onGenerateAIReply via e.formInput.refineInstruction.
+        var refineSection = CardService.newCardSection()
+            .setHeader("Not quite right?")
+            .addWidget(
+                CardService.newTextInput()
+                    .setFieldName("refineInstruction")
+                    .setTitle("What should change?")
+                    .setHint("e.g. shorter, more formal, mention the refund")
+                    .setMultiline(true)
+                    .setValue(instruction || '')
+            )
+            .addWidget(
+                CardService.newTextButton()
+                    .setText("↻ Regenerate")
+                    .setOnClickAction(CardService.newAction()
+                        .setFunctionName("onGenerateAIReply")
+                        .setLoadIndicator(CardService.LoadIndicator.SPINNER))
+            );
+        if (instruction) {
+            refineSection.addWidget(CardService.newTextParagraph().setText(
+                '<font color="#0a7ea4"><i>These replies were adjusted with your request above.</i></font>'
+            ));
+        }
+        cardBuilder.addSection(refineSection);
 
         return cardBuilder.build();
     } else {
