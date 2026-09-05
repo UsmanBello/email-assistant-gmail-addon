@@ -36,15 +36,17 @@ function collectThreadMessages(message) {
 
         // Attachment METADATA only (never contents): it lets the backend treat an
         // attachment-only email as a real message instead of "nothing to reply to".
-        // Inline images (signature logos etc.) are noise, not attachments — skip them.
+        // Inline images are included but flagged — a pasted screenshot is inline
+        // too, and whether one matters is the model's call, not ours.
         var attachments = [];
         try {
-            var files = msg.getAttachments({ includeInlineImages: false, includeAttachments: true });
-            for (var j = 0; j < files.length && j < MAX_ATTACHMENTS_PER_MESSAGE; j++) {
+            var entries = getMessageAttachmentsWithInlineFlag(msg);
+            for (var j = 0; j < entries.length && j < MAX_ATTACHMENTS_PER_MESSAGE; j++) {
                 attachments.push({
-                    name: String(files[j].getName() || '').substring(0, 200),
-                    mimeType: String(files[j].getContentType() || '').substring(0, 100),
-                    size: files[j].getSize()
+                    name: String(entries[j].file.getName() || '').substring(0, 200),
+                    mimeType: String(entries[j].file.getContentType() || '').substring(0, 100),
+                    size: entries[j].file.getSize(),
+                    inline: entries[j].inline
                 });
             }
         } catch (attErr) {
@@ -90,6 +92,93 @@ function collectThreadMessages(message) {
             return { messages: [], usedThread: false };
         }
     }
+}
+
+// Upload bounds for attachment contents (must stay inside the backend's scoped
+// 12mb JSON limit once base64-inflated, and inside Heroku's 30s window).
+var MAX_UPLOAD_FILES = 3;
+var MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024;
+var MAX_UPLOAD_TOTAL_BYTES = 6 * 1024 * 1024;
+// Types the backend can actually extract: PDF text, images via vision, plain text/CSV.
+var EXTRACTABLE_MIME = /^(application\/pdf|image\/(png|jpeg|jpg|gif|webp)|text\/(plain|csv))/i;
+
+/**
+ * All of a message's attachments, each tagged with whether it is inline
+ * (embedded in the body — a pasted screenshot, or a signature logo). Apps
+ * Script doesn't expose the flag directly, so it is derived by diffing the
+ * with/without-inline attachment lists (matched by name+size).
+ */
+function getMessageAttachmentsWithInlineFlag(message) {
+    try {
+        var regular = message.getAttachments({ includeInlineImages: false, includeAttachments: true }) || [];
+        var all = message.getAttachments({ includeInlineImages: true, includeAttachments: true }) || [];
+        var regularKeys = {};
+        for (var i = 0; i < regular.length; i++) {
+            regularKeys[regular[i].getName() + '|' + regular[i].getSize()] = true;
+        }
+        return all.map(function (f) {
+            return { file: f, inline: !regularKeys[f.getName() + '|' + f.getSize()] };
+        });
+    } catch (err) {
+        Logger.log('getMessageAttachmentsWithInlineFlag failed: ' + err);
+        return [];
+    }
+}
+
+// Heuristic signals only — they rank files and become hints for the vision
+// model, but never exclude anything on their own. The model judges content.
+var SMALL_IMAGE_BYTES = 20 * 1024;
+// Outlook-style signature attachments ("image001.png").
+var SIGNATURE_NAME_RE = /^image0\d{2}\.(png|gif|jpe?g)$/i;
+
+/**
+ * Picks the open email's attachments worth reading, automatically — no user
+ * checklist. Hard gates are cost/transport bounds only (supported types, size
+ * caps, max count). Everything semantic — signature logo vs pasted screenshot,
+ * tiny-but-important vs decorative — is the vision model's call: heuristics
+ * only rank the candidates for the limited slots and travel along as hints
+ * the model may overrule. Inline images are INCLUDED (a user dropping an
+ * image into the message body makes it inline).
+ */
+function autoSelectAttachments(message) {
+    var entries = getMessageAttachmentsWithInlineFlag(message);
+    var candidates = [];
+    for (var i = 0; i < entries.length; i++) {
+        var file = entries[i].file;
+        var inline = entries[i].inline;
+        var mime = String(file.getContentType() || '');
+        var size = file.getSize();
+        var name = String(file.getName() || '');
+        if (!EXTRACTABLE_MIME.test(mime) || size > MAX_UPLOAD_FILE_BYTES) continue;
+
+        var isImage = /^image\//i.test(mime);
+        var hints = [];
+        if (isImage && inline) hints.push('embedded inline in the message body (could be a pasted screenshot or a signature/logo)');
+        if (isImage && size < SMALL_IMAGE_BYTES) hints.push('very small (' + Math.max(1, Math.round(size / 1024)) + ' KB)');
+        if (SIGNATURE_NAME_RE.test(name)) hints.push('filename pattern often used by email signature images');
+
+        candidates.push({
+            file: file,
+            size: size,
+            hint: hints.join('; '),
+            // Ranking for the limited slots: documents, then regular images,
+            // then suspected-noise images — larger first within each group.
+            priority: /^application\/pdf|^text\//i.test(mime) ? 0 : (hints.length ? 2 : 1)
+        });
+    }
+    candidates.sort(function (a, b) {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return b.size - a.size;
+    });
+
+    var selected = [];
+    var totalBytes = 0;
+    for (var c = 0; c < candidates.length && selected.length < MAX_UPLOAD_FILES; c++) {
+        if (totalBytes + candidates[c].size > MAX_UPLOAD_TOTAL_BYTES) continue;
+        selected.push(candidates[c]);
+        totalBytes += candidates[c].size;
+    }
+    return selected;
 }
 
 /**
@@ -196,6 +285,8 @@ function onGenerateAIReply(e) {
     // message — the backend picks the reply target from it.
     var subject = '', from = '', body = '', threadId = '', messageId = '';
     var threadMessages = [];
+    var attachmentContents = [];
+    var attachmentNames = [];
     try {
         if (e && e.gmail && e.gmail.messageId) {
             messageId = e.gmail.messageId;
@@ -210,6 +301,26 @@ function onGenerateAIReply(e) {
 
             var collected = collectThreadMessages(message);
             threadMessages = collected.messages;
+
+            // Automatically upload the attachments worth reading (base64) so the
+            // backend can use their contents for the reply. Selection re-runs the
+            // same way on every generate/regenerate, so no state to carry. Each
+            // file carries our heuristic hints; the vision model makes the call.
+            var selectedFiles = autoSelectAttachments(message);
+            for (var p = 0; p < selectedFiles.length; p++) {
+                var picked = selectedFiles[p].file;
+                try {
+                    attachmentContents.push({
+                        name: String(picked.getName() || '').substring(0, 200),
+                        mimeType: String(picked.getContentType() || '').substring(0, 100),
+                        hint: selectedFiles[p].hint || '',
+                        dataBase64: Utilities.base64Encode(picked.getBytes())
+                    });
+                    attachmentNames.push(String(picked.getName() || 'unnamed file'));
+                } catch (encErr) {
+                    Logger.log('AI Reply: could not encode attachment: ' + encErr);
+                }
+            }
         }
     } catch (err) {
         Logger.log('AI Reply: Error extracting email context: ' + err);
@@ -238,7 +349,9 @@ function onGenerateAIReply(e) {
                     threadId: threadId,
                     messageId: messageId,
                     // The user's own steering for this generation; empty on first run.
-                    instruction: instruction
+                    instruction: instruction,
+                    // Contents of the attachments the user ticked; empty when none.
+                    attachmentContents: attachmentContents
                 }),
                 muteHttpExceptions: true,
                 headers: { Authorization: "Bearer " + idToken },
@@ -302,6 +415,14 @@ function onGenerateAIReply(e) {
 
         // Quick links always come first, on every card.
         cardBuilder.addSection(buildShortcutsSection());
+
+        if (attachmentNames.length) {
+            cardBuilder.addSection(
+                CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(
+                    '<font color="#0a7ea4">📎 <i>Considered attachment' + (attachmentNames.length === 1 ? '' : 's') + ': ' + attachmentNames.join(', ') + '</i></font>'
+                ))
+            );
+        }
 
         for (var i = 0; i < aiReplies.length; i++) {
             var replyText = aiReplies[i];

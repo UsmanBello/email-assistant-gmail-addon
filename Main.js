@@ -99,6 +99,10 @@ function buildAddOn(e) {
                     '<font color="#555" size="2">' + snippet + '</font>' +
                     '</div>'
                 ))
+        );
+
+        cardBuilder.addSection(
+            CardService.newCardSection()
                 .addWidget(
                     CardService.newTextButton()
                         .setText("🤖 Generate AI Reply")
