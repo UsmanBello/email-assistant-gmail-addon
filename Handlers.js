@@ -7,6 +7,7 @@
 // newest turns, so these bounds exist to keep the request payload sane.
 var MAX_THREAD_MESSAGES = 15;
 var MAX_MESSAGE_BODY_CHARS = 6000;
+var MAX_ATTACHMENTS_PER_MESSAGE = 10;
 
 /**
  * Collects the whole conversation around the open message.
@@ -32,6 +33,24 @@ function collectThreadMessages(message) {
         if (body.length > MAX_MESSAGE_BODY_CHARS) {
             body = body.substring(0, MAX_MESSAGE_BODY_CHARS);
         }
+
+        // Attachment METADATA only (never contents): it lets the backend treat an
+        // attachment-only email as a real message instead of "nothing to reply to".
+        // Inline images (signature logos etc.) are noise, not attachments — skip them.
+        var attachments = [];
+        try {
+            var files = msg.getAttachments({ includeInlineImages: false, includeAttachments: true });
+            for (var j = 0; j < files.length && j < MAX_ATTACHMENTS_PER_MESSAGE; j++) {
+                attachments.push({
+                    name: String(files[j].getName() || '').substring(0, 200),
+                    mimeType: String(files[j].getContentType() || '').substring(0, 100),
+                    size: files[j].getSize()
+                });
+            }
+        } catch (attErr) {
+            Logger.log('collectThreadMessages: attachment read failed: ' + attErr);
+        }
+
         return {
             id: msg.getId(),
             from: msg.getFrom() || '',
@@ -40,7 +59,8 @@ function collectThreadMessages(message) {
             subject: msg.getSubject() || '',
             date: msg.getDate() ? msg.getDate().toUTCString() : '',
             timestamp: msg.getDate() ? msg.getDate().getTime() : null,
-            body: body
+            body: body,
+            attachments: attachments
         };
     };
 
