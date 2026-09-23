@@ -96,11 +96,11 @@ function collectThreadMessages(message) {
 
 // Upload bounds for attachment contents (must stay inside the backend's scoped
 // 12mb JSON limit once base64-inflated, and inside Heroku's 30s window).
-var MAX_UPLOAD_FILES = 3;
+var MAX_UPLOAD_FILES = 10;
 var MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024;
 var MAX_UPLOAD_TOTAL_BYTES = 6 * 1024 * 1024;
 // Types the backend can actually extract: PDF text, images via vision, plain text/CSV.
-var EXTRACTABLE_MIME = /^(application\/pdf|image\/(png|jpeg|jpg|gif|webp)|text\/(plain|csv))/i;
+var EXTRACTABLE_MIME = /^(application\/pdf|image\/(png|jpeg|jpg|gif|webp)|text\/(plain|csv)|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|application\/vnd\.ms-excel|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet)/i;
 
 /**
  * All of a message's attachments, each tagged with whether it is inline
@@ -163,7 +163,7 @@ function autoSelectAttachments(message) {
             hint: hints.join('; '),
             // Ranking for the limited slots: documents, then regular images,
             // then suspected-noise images — larger first within each group.
-            priority: /^application\/pdf|^text\//i.test(mime) ? 0 : (hints.length ? 2 : 1)
+            priority: /^image\//i.test(mime) ? (hints.length ? 2 : 1) : 0
         });
     }
     candidates.sort(function (a, b) {
