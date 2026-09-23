@@ -85,20 +85,39 @@ function buildAddOn(e) {
         var from = message.getFrom();
         var body = message.getPlainBody();
         var snippet = body.length > 300 ? body.substring(0, 300) + "..." : body;
+        if (!snippet || !snippet.trim()) {
+            snippet = '<i>No message text</i>';
+        }
+
+        var previewHtml =
+            '<div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px;">' +
+            '<br><br>' +
+            '<b>Subject:</b> ' + subject +
+            '<br><br>' +
+            '<b>From:</b> ' + from +
+            '<br><br>' +
+            '<b>Preview:</b><br>' +
+            '<font color="#555" size="2">' + snippet + '</font>';
+
+        // Show which attachments were detected — the same auto-selection that
+        // will be read for the reply — so the user knows we saw them even when
+        // the message body is empty.
+        var detected = autoSelectAttachments(message);
+        if (detected.length) {
+            var detectedNames = [];
+            for (var d = 0; d < detected.length; d++) {
+                detectedNames.push(String(detected[d].file.getName() || 'unnamed file'));
+            }
+            previewHtml +=
+                '<br><br><font color="#0a7ea4">📎 <b>Attachment' + (detected.length === 1 ? '' : 's') + ' detected:</b> ' +
+                detectedNames.join(', ') +
+                '<br><i>Will be read and used for the reply.</i></font>';
+        }
+        previewHtml += '</div>';
 
         cardBuilder.addSection(
             CardService.newCardSection()
-                .addWidget(CardService.newTextParagraph().setText(
-                    '<div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 16px;">' +
-                    '<br><br>' +
-                    '<b>Subject:</b> ' + subject +
-                    '<br><br>' +
-                    '<b>From:</b> ' + from +
-                    '<br><br>' +
-                    '<b>Preview:</b><br>' +
-                    '<font color="#555" size="2">' + snippet + '</font>' +
-                    '</div>'
-                ))
+                .addWidget(CardService.newTextParagraph().setText(previewHtml))
         );
 
         cardBuilder.addSection(

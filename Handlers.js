@@ -182,6 +182,14 @@ function autoSelectAttachments(message) {
 }
 
 /**
+ * One-line preview of a generated text, for collapsed section headers.
+ */
+function previewSnippet(text) {
+    var flat = String(text || '').replace(/\s+/g, ' ').trim();
+    return flat.length > 60 ? flat.substring(0, 60) + '…' : flat;
+}
+
+/**
  * Builds a simple informational card. Text is always code-supplied, never
  * interpolated from a backend response.
  */
@@ -441,6 +449,16 @@ function onGenerateAIReply(e) {
                         .setText("Use This Reply")
                         .setComposeAction(composeAction, CardService.ComposedEmailType.REPLY_AS_DRAFT)
                 );
+
+            // The first suggestion is the product — always fully visible. Later
+            // ones collapse to a preview in the section header (Gmail cards can't
+            // be collapsible AND initially open), halving the card height.
+            if (i > 0) {
+                responseSection
+                    .setHeader('Reply ' + (i + 1) + ': "' + previewSnippet(replyText) + '"')
+                    .setCollapsible(true)
+                    .setNumUncollapsibleWidgets(0);
+            }
             cardBuilder.addSection(responseSection);
         }
 
@@ -467,6 +485,11 @@ function onGenerateAIReply(e) {
             refineSection.addWidget(CardService.newTextParagraph().setText(
                 '<font color="#0a7ea4"><i>These replies were adjusted with your request above.</i></font>'
             ));
+        } else {
+            // Optional feature: collapsed to its header on a first generation.
+            // After a regenerate it stays fully visible so the user sees the
+            // instruction that shaped these replies.
+            refineSection.setCollapsible(true).setNumUncollapsibleWidgets(0);
         }
         cardBuilder.addSection(refineSection);
 

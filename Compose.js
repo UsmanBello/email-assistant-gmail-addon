@@ -220,15 +220,22 @@ function onGenerateCompose(e) {
                 draftTo: to,
                 draftSubject: subject
             });
-        cardBuilder.addSection(
-            CardService.newCardSection()
-                .addWidget(CardService.newTextParagraph().setText(drafts[i]))
-                .addWidget(
-                    CardService.newTextButton()
-                        .setText("Use This Draft")
-                        .setComposeAction(composeAction, CardService.ComposedEmailType.STANDALONE_DRAFT)
-                )
-        );
+        var draftSection = CardService.newCardSection()
+            .addWidget(CardService.newTextParagraph().setText(drafts[i]))
+            .addWidget(
+                CardService.newTextButton()
+                    .setText("Use This Draft")
+                    .setComposeAction(composeAction, CardService.ComposedEmailType.STANDALONE_DRAFT)
+            );
+        // First draft always fully visible; later ones collapse to a preview
+        // header (cards can't be collapsible AND initially open).
+        if (i > 0) {
+            draftSection
+                .setHeader('Draft ' + (i + 1) + ': "' + previewSnippet(drafts[i]) + '"')
+                .setCollapsible(true)
+                .setNumUncollapsibleWidgets(0);
+        }
+        cardBuilder.addSection(draftSection);
     }
 
     var refineSection = CardService.newCardSection()
@@ -252,6 +259,10 @@ function onGenerateCompose(e) {
         refineSection.addWidget(CardService.newTextParagraph().setText(
             '<font color="#0a7ea4"><i>These drafts were adjusted with your request above.</i></font>'
         ));
+    } else {
+        // Optional feature: collapsed to its header on a first generation.
+        // Stays fully visible after a regenerate so the instruction is in view.
+        refineSection.setCollapsible(true).setNumUncollapsibleWidgets(0);
     }
     cardBuilder.addSection(refineSection);
 
