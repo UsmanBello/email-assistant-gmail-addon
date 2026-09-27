@@ -337,6 +337,7 @@ function onGenerateAIReply(e) {
     // Call backend to generate AI reply using the add-on specific endpoint
     var aiReplies = [];
     var errorMsg = '';
+    var billingRequired = false;
     var infoMsg = '';
     // The message the backend chose to answer — the newest one not sent by this
     // user. Drafts are threaded onto this, not onto whatever the user had open.
@@ -498,7 +499,8 @@ function onGenerateAIReply(e) {
         return buildInfoCard(
             "ReplAI - Email Assistant",
             errorMsg || "AI reply generation failed. Please try again.",
-            "onGenerateAIReply"
+            "onGenerateAIReply",
+            billingRequired
         );
     }
 }

@@ -17,6 +17,13 @@ function buildComposeCard(opts) {
         formSection.addWidget(CardService.newTextParagraph().setText(
             '<font color="#c0392b"><b>' + opts.error + '</b></font>'
         ));
+        if (opts.billingRequired) {
+            formSection.addWidget(
+                CardService.newTextButton()
+                    .setText("Add billing →")
+                    .setOpenLink(CardService.newOpenLink().setUrl(FRONTEND_URL + "/billing"))
+            );
+        }
     }
 
     formSection
@@ -117,6 +124,7 @@ function onGenerateCompose(e) {
     }
 
     var drafts = [];
+    var billingRequired = false;
     var errorMsg = '';
     try {
         var response = UrlFetchApp.fetch(
@@ -146,7 +154,8 @@ function onGenerateCompose(e) {
         } else if (code === 401 || code === 403) {
             errorMsg = "You need to sign in again to generate drafts.";
         } else if (code === 402) {
-            errorMsg = "Your free trial has ended. Add billing at replai.us to keep generating drafts.";
+            errorMsg = "Your free trial has ended. Add billing to keep generating drafts.";
+            billingRequired = true;
         } else if (code === 404) {
             // 404 is ambiguous: the backend returns it for an unregistered user
             // (JSON with error field), but Express also 404s (HTML) when the
@@ -173,7 +182,7 @@ function onGenerateCompose(e) {
     }
 
     if (errorMsg) {
-        return buildComposeCard({ to: to, subject: subject, intent: intent, error: errorMsg });
+        return buildComposeCard({ to: to, subject: subject, intent: intent, error: errorMsg, billingRequired: billingRequired });
     }
 
     var cardBuilder = CardService.newCardBuilder()
